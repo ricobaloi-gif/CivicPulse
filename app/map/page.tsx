@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import * as maplibregl from "maplibre-gl";
@@ -103,9 +103,21 @@ export default function MapPage() {
   const [error, setError] =
     useState("");
 
-  // ------------------------------------
+  const [search, setSearch] =
+    useState("");
+
+  const [categoryFilter, setCategoryFilter] =
+    useState("all");
+
+  const [severityFilter, setSeverityFilter] =
+    useState("all");
+
+  const [statusFilter, setStatusFilter] =
+    useState("all");
+
+  // ----------------------------------
   // LOAD REPORTS
-  // ------------------------------------
+  // ----------------------------------
 
   useEffect(() => {
     async function loadReports() {
@@ -122,6 +134,7 @@ export default function MapPage() {
           snapshot.docs
             .map((document) => ({
               id: document.id,
+
               ...(document.data() as Omit<
                 Report,
                 "id"
@@ -129,10 +142,8 @@ export default function MapPage() {
             }))
             .filter(
               (report) =>
-                typeof report.latitude ===
-                  "number" &&
-                typeof report.longitude ===
-                  "number"
+                typeof report.latitude === "number" &&
+                typeof report.longitude === "number"
             );
 
         setReports(loadedReports);
@@ -153,9 +164,50 @@ export default function MapPage() {
     loadReports();
   }, []);
 
-  // ------------------------------------
+  // ----------------------------------
+  // FILTER REPORTS
+  // ----------------------------------
+
+  const filteredReports =
+    useMemo(() => {
+      return reports.filter((report) => {
+        const matchesSearch =
+          report.title
+            .toLowerCase()
+            .includes(
+              search.toLowerCase()
+            );
+
+        const matchesCategory =
+          categoryFilter === "all" ||
+          report.category === categoryFilter;
+
+        const matchesSeverity =
+          severityFilter === "all" ||
+          report.severity === severityFilter;
+
+        const matchesStatus =
+          statusFilter === "all" ||
+          report.status === statusFilter;
+
+        return (
+          matchesSearch &&
+          matchesCategory &&
+          matchesSeverity &&
+          matchesStatus
+        );
+      });
+    }, [
+      reports,
+      search,
+      categoryFilter,
+      severityFilter,
+      statusFilter,
+    ]);
+
+  // ----------------------------------
   // CREATE MAP
-  // ------------------------------------
+  // ----------------------------------
 
   useEffect(() => {
     if (!mapContainer.current) {
@@ -226,9 +278,9 @@ export default function MapPage() {
     };
   }, []);
 
-  // ------------------------------------
+  // ----------------------------------
   // REPORT MARKERS
-  // ------------------------------------
+  // ----------------------------------
 
   useEffect(() => {
     const map =
@@ -241,20 +293,18 @@ export default function MapPage() {
     const markers:
       maplibregl.Marker[] = [];
 
-    reports.forEach(
+    filteredReports.forEach(
       (report) => {
-
-        // Custom marker wrapper
         const markerElement =
           document.createElement(
             "div"
           );
 
         markerElement.style.width =
-          "46px";
+          "48px";
 
         markerElement.style.height =
-          "46px";
+          "48px";
 
         markerElement.style.borderRadius =
           "50%";
@@ -269,7 +319,7 @@ export default function MapPage() {
           "center";
 
         markerElement.style.fontSize =
-          "23px";
+          "24px";
 
         markerElement.style.cursor =
           "pointer";
@@ -283,10 +333,15 @@ export default function MapPage() {
           "3px solid white";
 
         markerElement.style.boxShadow =
-          "0 4px 12px rgba(0,0,0,0.35)";
+          "0 4px 14px rgba(0,0,0,0.45)";
 
         markerElement.style.transition =
           "transform 0.15s ease";
+
+        markerElement.textContent =
+          getCategoryIcon(
+            report.category
+          );
 
         markerElement.title =
           `${report.category}: ${report.title}`;
@@ -307,12 +362,10 @@ export default function MapPage() {
           }
         );
 
-        markerElement.textContent =
-          getCategoryIcon(
-            report.category
-          );
+        // ----------------------------
+        // POPUP
+        // ----------------------------
 
-        // Popup
         const popupContainer =
           document.createElement(
             "div"
@@ -424,11 +477,11 @@ export default function MapPage() {
         button.style.color =
           "white";
 
-        button.style.borderRadius =
-          "7px";
-
         button.style.border =
           "none";
+
+        button.style.borderRadius =
+          "7px";
 
         button.style.cursor =
           "pointer";
@@ -472,17 +525,65 @@ export default function MapPage() {
       }
     );
 
+    // AUTO CENTER REPORTS
+
+    if (
+      filteredReports.length === 1
+    ) {
+      const report =
+        filteredReports[0];
+
+      map.flyTo({
+        center: [
+          report.longitude,
+          report.latitude,
+        ],
+
+        zoom: 15,
+
+        essential: true,
+      });
+    }
+
+    if (
+      filteredReports.length > 1
+    ) {
+      const bounds =
+        new maplibregl.LngLatBounds();
+
+      filteredReports.forEach(
+        (report) => {
+          bounds.extend([
+            report.longitude,
+            report.latitude,
+          ]);
+        }
+      );
+
+      map.fitBounds(
+        bounds,
+        {
+          padding: 80,
+          maxZoom: 15,
+          duration: 1000,
+        }
+      );
+    }
+
     return () => {
       markers.forEach(
         (marker) =>
           marker.remove()
       );
     };
-  }, [reports, router]);
+  }, [
+    filteredReports,
+    router,
+  ]);
 
-  // ------------------------------------
-  // USER LOCATION
-  // ------------------------------------
+  // ----------------------------------
+  // FIND USER LOCATION
+  // ----------------------------------
 
   function findMyLocation() {
     const map =
@@ -513,38 +614,38 @@ export default function MapPage() {
         const latitude =
           position.coords.latitude;
 
-        // Remove previous user marker
         userMarkerRef.current?.remove();
 
-        const userMarker =
+        const markerElement =
           document.createElement(
             "div"
           );
 
-        userMarker.style.width =
+        markerElement.style.width =
           "22px";
 
-        userMarker.style.height =
+        markerElement.style.height =
           "22px";
 
-        userMarker.style.borderRadius =
+        markerElement.style.borderRadius =
           "50%";
 
-        userMarker.style.background =
+        markerElement.style.background =
           "#3b82f6";
 
-        userMarker.style.border =
+        markerElement.style.border =
           "4px solid white";
 
-        userMarker.style.boxShadow =
+        markerElement.style.boxShadow =
           "0 0 0 5px rgba(59,130,246,0.25)";
 
-        userMarker.title =
+        markerElement.title =
           "Your location";
 
         userMarkerRef.current =
           new maplibregl.Marker({
-            element: userMarker,
+            element:
+              markerElement,
           })
             .setLngLat([
               longitude,
@@ -559,7 +660,6 @@ export default function MapPage() {
             )
             .addTo(map);
 
-        // Smoothly move map to user
         map.flyTo({
           center: [
             longitude,
@@ -572,7 +672,6 @@ export default function MapPage() {
         });
 
         setLocationFound(true);
-
         setLocationLoading(false);
       },
 
@@ -587,7 +686,7 @@ export default function MapPage() {
           locationError.PERMISSION_DENIED
         ) {
           setError(
-            "Location permission was denied. Please allow location access in your browser."
+            "Location permission was denied. Please allow location access."
           );
         } else {
           setError(
@@ -595,22 +694,32 @@ export default function MapPage() {
           );
         }
 
-        setLocationLoading(
-          false
-        );
+        setLocationLoading(false);
       },
 
       {
-        enableHighAccuracy: true,
-        timeout: 15000,
-        maximumAge: 30000,
+        enableHighAccuracy:
+          true,
+
+        timeout:
+          15000,
+
+        maximumAge:
+          30000,
       }
     );
   }
 
-  // ------------------------------------
-  // UI
-  // ------------------------------------
+  // ----------------------------------
+  // CLEAR FILTERS
+  // ----------------------------------
+
+  function clearFilters() {
+    setSearch("");
+    setCategoryFilter("all");
+    setSeverityFilter("all");
+    setStatusFilter("all");
+  }
 
   return (
     <main className="min-h-screen bg-gray-950 text-white">
@@ -619,59 +728,234 @@ export default function MapPage() {
 
       <div className="border-b border-gray-800 bg-gray-900 p-5">
 
-        <div className="mx-auto flex max-w-7xl flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="mx-auto max-w-7xl">
 
-          <div>
-            <h1 className="text-2xl font-bold">
-              CivicPulse Map
-            </h1>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 
-            <p className="text-sm text-gray-400">
-              Explore issues reported across your community.
-            </p>
+            <div>
+              <h1 className="text-2xl font-bold">
+                CivicPulse Map
+              </h1>
+
+              <p className="text-sm text-gray-400">
+                Explore issues reported across your community.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap gap-3">
+
+              <button
+                onClick={
+                  findMyLocation
+                }
+                disabled={
+                  locationLoading
+                }
+                className="rounded-lg bg-green-600 px-4 py-2 font-semibold hover:bg-green-500 disabled:opacity-50"
+              >
+                {locationLoading
+                  ? "Finding you..."
+                  : locationFound
+                  ? "📍 My Location"
+                  : "◎ Find My Location"}
+              </button>
+
+              <button
+                onClick={() =>
+                  router.push(
+                    "/dashboard"
+                  )
+                }
+                className="rounded-lg border border-gray-700 px-4 py-2 hover:bg-gray-800"
+              >
+                Dashboard
+              </button>
+
+              <button
+                onClick={() =>
+                  router.push(
+                    "/report/new"
+                  )
+                }
+                className="rounded-lg bg-blue-600 px-4 py-2 font-semibold hover:bg-blue-500"
+              >
+                Report Issue
+              </button>
+
+            </div>
           </div>
 
-          <div className="flex flex-wrap gap-3">
+          {/* FILTERS */}
+
+          <div className="mt-5 grid gap-3 md:grid-cols-5">
+
+            <input
+              type="text"
+              placeholder="Search reports..."
+              value={search}
+              onChange={(e) =>
+                setSearch(
+                  e.target.value
+                )
+              }
+              className="rounded-lg border border-gray-700 bg-gray-800 px-4 py-2 outline-none"
+            />
+
+            <select
+              value={
+                categoryFilter
+              }
+              onChange={(e) =>
+                setCategoryFilter(
+                  e.target.value
+                )
+              }
+              className="rounded-lg border border-gray-700 bg-gray-800 px-4 py-2"
+            >
+              <option value="all">
+                All categories
+              </option>
+
+              <option value="Pothole">
+                Pothole
+              </option>
+
+              <option value="Water Leak">
+                Water Leak
+              </option>
+
+              <option value="Power Outage">
+                Power Outage
+              </option>
+
+              <option value="Broken Streetlight">
+                Broken Streetlight
+              </option>
+
+              <option value="Illegal Dumping">
+                Illegal Dumping
+              </option>
+
+              <option value="Road Hazard">
+                Road Hazard
+              </option>
+
+              <option value="Sewer Issue">
+                Sewer Issue
+              </option>
+
+              <option value="Vandalism">
+                Vandalism
+              </option>
+
+              <option value="Other">
+                Other
+              </option>
+            </select>
+
+            <select
+              value={
+                severityFilter
+              }
+              onChange={(e) =>
+                setSeverityFilter(
+                  e.target.value
+                )
+              }
+              className="rounded-lg border border-gray-700 bg-gray-800 px-4 py-2"
+            >
+              <option value="all">
+                All severities
+              </option>
+
+              <option value="low">
+                Low
+              </option>
+
+              <option value="medium">
+                Medium
+              </option>
+
+              <option value="high">
+                High
+              </option>
+
+              <option value="critical">
+                Critical
+              </option>
+            </select>
+
+            <select
+              value={
+                statusFilter
+              }
+              onChange={(e) =>
+                setStatusFilter(
+                  e.target.value
+                )
+              }
+              className="rounded-lg border border-gray-700 bg-gray-800 px-4 py-2"
+            >
+              <option value="all">
+                All statuses
+              </option>
+
+              <option value="submitted">
+                Submitted
+              </option>
+
+              <option value="verified">
+                Verified
+              </option>
+
+              <option value="acknowledged">
+                Acknowledged
+              </option>
+
+              <option value="assigned">
+                Assigned
+              </option>
+
+              <option value="in-progress">
+                In Progress
+              </option>
+
+              <option value="resolved">
+                Resolved
+              </option>
+            </select>
 
             <button
               onClick={
-                findMyLocation
-              }
-              disabled={
-                locationLoading
-              }
-              className="rounded-lg bg-green-600 px-4 py-2 font-semibold hover:bg-green-500 disabled:opacity-50"
-            >
-              {locationLoading
-                ? "Finding you..."
-                : locationFound
-                ? "📍 My Location"
-                : "◎ Find My Location"}
-            </button>
-
-            <button
-              onClick={() =>
-                router.push(
-                  "/dashboard"
-                )
+                clearFilters
               }
               className="rounded-lg border border-gray-700 px-4 py-2 hover:bg-gray-800"
             >
-              Dashboard
-            </button>
-
-            <button
-              onClick={() =>
-                router.push(
-                  "/report/new"
-                )
-              }
-              className="rounded-lg bg-blue-600 px-4 py-2 font-semibold hover:bg-blue-500"
-            >
-              Report Issue
+              Clear Filters
             </button>
 
           </div>
+
+          <p className="mt-3 text-sm text-gray-400">
+            Showing{" "}
+
+            <span className="font-semibold text-white">
+              {
+                filteredReports.length
+              }
+            </span>
+
+            {" "}of{" "}
+
+            <span className="font-semibold text-white">
+              {
+                reports.length
+              }
+            </span>
+
+            {" "}reports
+          </p>
+
         </div>
       </div>
 
@@ -736,7 +1020,7 @@ export default function MapPage() {
 
       <div
         ref={mapContainer}
-        className="h-[calc(100vh-145px)] w-full"
+        className="h-[calc(100vh-250px)] w-full"
       />
 
     </main>

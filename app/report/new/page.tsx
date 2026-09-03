@@ -1,294 +1,972 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
+
 import {
+  addDoc,
   collection,
   getDocs,
-  orderBy,
-  query,
+  serverTimestamp,
 } from "firebase/firestore";
 
 import { db } from "@/src/lib/firebase";
+import { useAuth } from "@/src/lib/AuthContext";
 
-type Report = {
+const categories = [
+  "Pothole",
+  "Water Leak",
+  "Power Outage",
+  "Broken Streetlight",
+  "Illegal Dumping",
+  "Road Hazard",
+  "Sewer Issue",
+  "Vandalism",
+  "Other",
+];
+
+const severities = [
+  "low",
+  "medium",
+  "high",
+  "critical",
+];
+
+type ExistingReport = {
   id: string;
   title: string;
-  description: string;
   category: string;
-  severity: string;
   status: string;
-  imageUrl?: string | null;
+  latitude: number;
+  longitude: number;
   confirmationCount?: number;
-  createdAt?: {
-    seconds: number;
-    nanoseconds: number;
-  };
 };
 
-export default function BrowseReportsPage() {
+type DuplicateMatch = ExistingReport & {
+  distance: number;
+};
+
+function calculateDistanceInMeters(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number
+) {
+  const earthRadius = 6371000;
+
+  const toRadians = (degrees: number) =>
+    (degrees * Math.PI) / 180;
+
+  const latitude1 = toRadians(lat1);
+  const latitude2 = toRadians(lat2);
+
+  const deltaLatitude =
+    toRadians(lat2 - lat1);
+
+  const deltaLongitude =
+    toRadians(lon2 - lon1);
+
+  const a =
+    Math.sin(deltaLatitude / 2) *
+      Math.sin(deltaLatitude / 2) +
+    Math.cos(latitude1) *
+      Math.cos(latitude2) *
+      Math.sin(deltaLongitude / 2) *
+      Math.sin(deltaLongitude / 2);
+
+  const c =
+    2 *
+    Math.atan2(
+      Math.sqrt(a),
+      Math.sqrt(1 - a)
+    );
+
+  return earthRadius * c;
+}
+
+export default function CreateReportPage() {
   const router = useRouter();
 
-  const [reports, setReports] = useState<Report[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const {
+    user,
+    loading: authLoading,
+  } = useAuth();
 
-  const [categoryFilter, setCategoryFilter] = useState("all");
-  const [severityFilter, setSeverityFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [search, setSearch] = useState("");
+  const [title, setTitle] =
+    useState("");
 
-  async function loadReports() {
+  const [description, setDescription] =
+    useState("");
+
+  const [category, setCategory] =
+    useState("Pothole");
+
+  const [severity, setSeverity] =
+    useState("medium");
+
+  const [latitude, setLatitude] =
+    useState<number | null>(null);
+
+  const [longitude, setLongitude] =
+    useState<number | null>(null);
+
+  const [photo, setPhoto] =
+    useState<File | null>(null);
+
+  const [
+    photoPreview,
+    setPhotoPreview,
+  ] = useState<string | null>(null);
+
+  const [loading, setLoading] =
+    useState(false);
+
+  const [
+    locationLoading,
+    setLocationLoading,
+  ] = useState(false);
+
+  const [
+    duplicateLoading,
+    setDuplicateLoading,
+  ] = useState(false);
+
+  const [
+    duplicateMatches,
+    setDuplicateMatches,
+  ] = useState<DuplicateMatch[]>([]);
+
+  const [
+    checkedForDuplicates,
+    setCheckedForDuplicates,
+  ] = useState(false);
+
+  const [
+    allowDuplicateSubmit,
+    setAllowDuplicateSubmit,
+  ] = useState(false);
+
+  const [error, setError] =
+    useState("");
+
+  async function checkForDuplicates(
+    currentLatitude: number,
+    currentLongitude: number,
+    currentCategory: string
+  ) {
     try {
-      setLoading(true);
-      setError("");
+      setDuplicateLoading(true);
 
-      const reportsQuery = query(
-        collection(db, "reports"),
-        orderBy("createdAt", "desc")
+      setDuplicateMatches([]);
+
+      setCheckedForDuplicates(false);
+
+      const snapshot =
+        await getDocs(
+          collection(db, "reports")
+        );
+
+      const nearbyMatches:
+        DuplicateMatch[] = [];
+
+      snapshot.docs.forEach(
+        (document) => {
+          const data =
+            document.data() as Omit<
+              ExistingReport,
+              "id"
+            >;
+
+          if (
+            typeof data.latitude !==
+              "number" ||
+            typeof data.longitude !==
+              "number"
+          ) {
+            return;
+          }
+
+          if (
+            data.category !==
+            currentCategory
+          ) {
+            return;
+          }
+
+          if (
+            data.status ===
+            "resolved"
+          ) {
+            return;
+          }
+
+          const distance =
+            calculateDistanceInMeters(
+              currentLatitude,
+              currentLongitude,
+              data.latitude,
+              data.longitude
+            );
+
+          if (distance <= 50) {
+            nearbyMatches.push({
+              id: document.id,
+              ...data,
+              distance,
+            });
+          }
+        }
       );
 
-      const snapshot = await getDocs(reportsQuery);
+      nearbyMatches.sort(
+        (a, b) =>
+          a.distance -
+          b.distance
+      );
 
-      const loadedReports: Report[] = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...(doc.data() as Omit<Report, "id">),
-      }));
+      setDuplicateMatches(
+        nearbyMatches
+      );
 
-      setReports(loadedReports);
+      setCheckedForDuplicates(
+        true
+      );
+
+      setAllowDuplicateSubmit(
+        nearbyMatches.length === 0
+      );
     } catch (err) {
-      console.error("Load reports error:", err);
-      setError("Failed to load reports.");
+      console.error(
+        "Duplicate check error:",
+        err
+      );
+
+      setError(
+        "Unable to check nearby reports."
+      );
+    } finally {
+      setDuplicateLoading(false);
+    }
+  }
+
+  function getLocation() {
+    setLocationLoading(true);
+    setError("");
+
+    if (
+      !navigator.geolocation
+    ) {
+      setError(
+        "Geolocation is not supported by your browser."
+      );
+
+      setLocationLoading(false);
+
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const currentLatitude =
+          position.coords.latitude;
+
+        const currentLongitude =
+          position.coords.longitude;
+
+        setLatitude(
+          currentLatitude
+        );
+
+        setLongitude(
+          currentLongitude
+        );
+
+        setLocationLoading(false);
+
+        setAllowDuplicateSubmit(
+          false
+        );
+
+        await checkForDuplicates(
+          currentLatitude,
+          currentLongitude,
+          category
+        );
+      },
+
+      (err) => {
+        console.error(err);
+
+        setError(
+          "Unable to get your location."
+        );
+
+        setLocationLoading(false);
+      },
+
+      {
+        enableHighAccuracy:
+          true,
+
+        timeout:
+          10000,
+      }
+    );
+  }
+
+  async function handleCategoryChange(
+    newCategory: string
+  ) {
+    setCategory(newCategory);
+
+    setAllowDuplicateSubmit(
+      false
+    );
+
+    setDuplicateMatches([]);
+
+    setCheckedForDuplicates(
+      false
+    );
+
+    if (
+      latitude !== null &&
+      longitude !== null
+    ) {
+      await checkForDuplicates(
+        latitude,
+        longitude,
+        newCategory
+      );
+    }
+  }
+
+  function handlePhotoChange(
+    event:
+      React.ChangeEvent<HTMLInputElement>
+  ) {
+    const file =
+      event.target.files?.[0];
+
+    if (!file) {
+      return;
+    }
+
+    setPhoto(file);
+
+    const preview =
+      URL.createObjectURL(
+        file
+      );
+
+    setPhotoPreview(
+      preview
+    );
+  }
+
+  async function uploadPhoto() {
+    if (!photo) {
+      return null;
+    }
+
+    const cloudName =
+      process.env
+        .NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
+
+    const uploadPreset =
+      process.env
+        .NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET;
+
+    if (
+      !cloudName ||
+      !uploadPreset
+    ) {
+      throw new Error(
+        "Cloudinary environment variables are missing."
+      );
+    }
+
+    const formData =
+      new FormData();
+
+    formData.append(
+      "file",
+      photo
+    );
+
+    formData.append(
+      "upload_preset",
+      uploadPreset
+    );
+
+    const response =
+      await fetch(
+        `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`,
+        {
+          method:
+            "POST",
+
+          body:
+            formData,
+        }
+      );
+
+    if (!response.ok) {
+      throw new Error(
+        "Photo upload failed."
+      );
+    }
+
+    const data =
+      await response.json();
+
+    return data.secure_url as string;
+  }
+
+  async function handleSubmit(
+    event:
+      React.FormEvent<HTMLFormElement>
+  ) {
+    event.preventDefault();
+
+    if (!user) {
+      setError(
+        "You must be logged in to create a report."
+      );
+
+      return;
+    }
+
+    if (
+      latitude === null ||
+      longitude === null
+    ) {
+      setError(
+        "Please capture your location first."
+      );
+
+      return;
+    }
+
+    if (
+      !checkedForDuplicates
+    ) {
+      setError(
+        "Please wait for the nearby-report check to complete."
+      );
+
+      return;
+    }
+
+    if (
+      duplicateMatches.length >
+        0 &&
+      !allowDuplicateSubmit
+    ) {
+      setError(
+        "A similar nearby report already exists. Review it first or choose Continue Anyway."
+      );
+
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+
+    try {
+      const imageUrl =
+        await uploadPhoto();
+
+      const reportRef =
+        await addDoc(
+          collection(
+            db,
+            "reports"
+          ),
+
+          {
+            title,
+
+            description,
+
+            category,
+
+            severity,
+
+            status:
+              "submitted",
+
+            latitude,
+
+            longitude,
+
+            imageUrl,
+
+            createdBy:
+              user.uid,
+
+            createdByEmail:
+              user.email,
+
+            confirmationCount:
+              0,
+
+            createdAt:
+              serverTimestamp(),
+
+            updatedAt:
+              serverTimestamp(),
+          }
+        );
+
+      router.push(
+        `/report/${reportRef.id}`
+      );
+    } catch (err) {
+      console.error(
+        "Create report error:",
+        err
+      );
+
+      if (
+        err instanceof Error
+      ) {
+        setError(
+          err.message
+        );
+      } else {
+        setError(
+          "Failed to create report."
+        );
+      }
     } finally {
       setLoading(false);
     }
   }
 
-  useEffect(() => {
-    loadReports();
-  }, []);
-
-  const filteredReports = useMemo(() => {
-    return reports.filter((report) => {
-      const matchesCategory =
-        categoryFilter === "all" ||
-        report.category === categoryFilter;
-
-      const matchesSeverity =
-        severityFilter === "all" ||
-        report.severity === severityFilter;
-
-      const matchesStatus =
-        statusFilter === "all" ||
-        report.status === statusFilter;
-
-      const searchText = search.toLowerCase();
-
-      const matchesSearch =
-        report.title.toLowerCase().includes(searchText) ||
-        report.description.toLowerCase().includes(searchText) ||
-        report.category.toLowerCase().includes(searchText);
-
-      return (
-        matchesCategory &&
-        matchesSeverity &&
-        matchesStatus &&
-        matchesSearch
-      );
-    });
-  }, [
-    reports,
-    categoryFilter,
-    severityFilter,
-    statusFilter,
-    search,
-  ]);
-
-  function formatDate(report: Report) {
-    if (!report.createdAt?.seconds) {
-      return "Unknown date";
-    }
-
-    return new Date(
-      report.createdAt.seconds * 1000
-    ).toLocaleString();
-  }
-
-  if (loading) {
+  if (authLoading) {
     return (
       <main className="min-h-screen flex items-center justify-center bg-gray-950 text-white">
-        Loading reports...
+        Loading...
+      </main>
+    );
+  }
+
+  if (!user) {
+    return (
+      <main className="min-h-screen flex items-center justify-center bg-gray-950 text-white p-6">
+        <div className="text-center">
+
+          <h1 className="text-2xl font-bold">
+            Login required
+          </h1>
+
+          <button
+            onClick={() =>
+              router.push(
+                "/login"
+              )
+            }
+            className="mt-4 rounded-lg bg-blue-600 px-5 py-3 font-semibold"
+          >
+            Go to login
+          </button>
+
+        </div>
       </main>
     );
   }
 
   return (
     <main className="min-h-screen bg-gray-950 text-white p-6">
-      <div className="mx-auto max-w-6xl">
-        <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h1 className="text-4xl font-bold">
-              Browse Reports
-            </h1>
 
-            <p className="mt-2 text-gray-400">
-              Explore civic issues reported by the community.
-            </p>
-          </div>
+      <div className="mx-auto max-w-2xl">
 
-          <button
-            onClick={() => router.push("/report/new")}
-            className="rounded-lg bg-blue-600 px-5 py-3 font-semibold hover:bg-blue-500"
-          >
+        <button
+          onClick={() =>
+            router.back()
+          }
+          className="mb-6 text-gray-400 hover:text-white"
+        >
+          ← Back
+        </button>
+
+        <div className="rounded-2xl border border-gray-800 bg-gray-900 p-8">
+
+          <h1 className="text-3xl font-bold">
             Report an Issue
-          </button>
-        </div>
+          </h1>
 
-        <div className="mb-8 grid gap-4 rounded-2xl border border-gray-800 bg-gray-900 p-5 md:grid-cols-4">
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search reports..."
-            className="rounded-lg border border-gray-700 bg-gray-800 px-4 py-3 outline-none"
-          />
+          <p className="mt-2 text-gray-400">
+            Tell your community about a problem that needs attention.
+          </p>
 
-          <select
-            value={categoryFilter}
-            onChange={(e) => setCategoryFilter(e.target.value)}
-            className="rounded-lg border border-gray-700 bg-gray-800 px-4 py-3"
+          <form
+            onSubmit={
+              handleSubmit
+            }
+            className="mt-8 space-y-6"
           >
-            <option value="all">All categories</option>
-            <option value="Pothole">Pothole</option>
-            <option value="Water Leak">Water Leak</option>
-            <option value="Power Outage">Power Outage</option>
-            <option value="Broken Streetlight">
-              Broken Streetlight
-            </option>
-            <option value="Illegal Dumping">
-              Illegal Dumping
-            </option>
-            <option value="Road Hazard">
-              Road Hazard
-            </option>
-            <option value="Sewer Issue">
-              Sewer Issue
-            </option>
-            <option value="Vandalism">
-              Vandalism
-            </option>
-            <option value="Other">Other</option>
-          </select>
 
-          <select
-            value={severityFilter}
-            onChange={(e) => setSeverityFilter(e.target.value)}
-            className="rounded-lg border border-gray-700 bg-gray-800 px-4 py-3"
-          >
-            <option value="all">All severities</option>
-            <option value="low">Low</option>
-            <option value="medium">Medium</option>
-            <option value="high">High</option>
-            <option value="critical">Critical</option>
-          </select>
+            <div>
+              <label className="mb-2 block text-sm font-medium">
+                Issue title
+              </label>
 
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="rounded-lg border border-gray-700 bg-gray-800 px-4 py-3"
-          >
-            <option value="all">All statuses</option>
-            <option value="submitted">Submitted</option>
-            <option value="verified">Verified</option>
-            <option value="acknowledged">
-              Acknowledged
-            </option>
-            <option value="assigned">Assigned</option>
-            <option value="in-progress">
-              In Progress
-            </option>
-            <option value="resolved">Resolved</option>
-          </select>
-        </div>
-
-        {error && (
-          <div className="mb-6 rounded-lg border border-red-900 bg-red-950/40 p-4 text-red-400">
-            {error}
-          </div>
-        )}
-
-        <p className="mb-5 text-sm text-gray-400">
-          {filteredReports.length} report
-          {filteredReports.length === 1 ? "" : "s"} found
-        </p>
-
-        {filteredReports.length === 0 ? (
-          <div className="rounded-2xl border border-gray-800 bg-gray-900 p-10 text-center">
-            <h2 className="text-2xl font-semibold">
-              No reports found
-            </h2>
-
-            <p className="mt-2 text-gray-400">
-              Try changing your filters or create a new report.
-            </p>
-          </div>
-        ) : (
-          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-            {filteredReports.map((report) => (
-              <button
-                key={report.id}
-                onClick={() =>
-                  router.push(`/report/${report.id}`)
+              <input
+                type="text"
+                value={title}
+                onChange={(e) =>
+                  setTitle(
+                    e.target.value
+                  )
                 }
-                className="overflow-hidden rounded-2xl border border-gray-800 bg-gray-900 text-left transition hover:-translate-y-1 hover:border-gray-700"
+                required
+                placeholder="Large pothole on Main Road"
+                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-4 py-3 outline-none focus:border-blue-500"
+              />
+            </div>
+
+            <div>
+
+              <label className="mb-2 block text-sm font-medium">
+                Category
+              </label>
+
+              <select
+                value={
+                  category
+                }
+                onChange={(e) =>
+                  handleCategoryChange(
+                    e.target.value
+                  )
+                }
+                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-4 py-3 outline-none"
               >
-                {report.imageUrl ? (
-                  <img
-                    src={report.imageUrl}
-                    alt={report.title}
-                    className="h-48 w-full object-cover"
-                  />
-                ) : (
-                  <div className="flex h-48 items-center justify-center bg-gray-800 text-gray-500">
-                    No photo
-                  </div>
+
+                {categories.map(
+                  (item) => (
+                    <option
+                      key={item}
+                      value={item}
+                    >
+                      {item}
+                    </option>
+                  )
                 )}
 
-                <div className="p-5">
-                  <div className="mb-3 flex flex-wrap gap-2">
-                    <span className="rounded-full bg-blue-950 px-3 py-1 text-xs text-blue-300">
-                      {report.category}
-                    </span>
+              </select>
+            </div>
 
-                    <span className="rounded-full bg-gray-800 px-3 py-1 text-xs text-gray-300">
-                      {report.status}
-                    </span>
+            <div>
+              <label className="mb-2 block text-sm font-medium">
+                Severity
+              </label>
 
-                    <span className="rounded-full bg-red-950 px-3 py-1 text-xs text-red-300">
-                      {report.severity}
-                    </span>
+              <select
+                value={
+                  severity
+                }
+                onChange={(e) =>
+                  setSeverity(
+                    e.target.value
+                  )
+                }
+                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-4 py-3 outline-none"
+              >
+
+                {severities.map(
+                  (item) => (
+                    <option
+                      key={item}
+                      value={item}
+                    >
+                      {item
+                        .charAt(0)
+                        .toUpperCase() +
+                        item.slice(
+                          1
+                        )}
+                    </option>
+                  )
+                )}
+
+              </select>
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-medium">
+                Description
+              </label>
+
+              <textarea
+                value={
+                  description
+                }
+                onChange={(e) =>
+                  setDescription(
+                    e.target.value
+                  )
+                }
+                required
+                rows={5}
+                placeholder="Describe what happened, where it is, and why it needs attention..."
+                className="w-full resize-none rounded-lg border border-gray-700 bg-gray-800 px-4 py-3 outline-none focus:border-blue-500"
+              />
+            </div>
+
+            {/* LOCATION */}
+
+            <div>
+
+              <label className="mb-2 block text-sm font-medium">
+                Location
+              </label>
+
+              <button
+                type="button"
+                onClick={
+                  getLocation
+                }
+                disabled={
+                  locationLoading ||
+                  duplicateLoading
+                }
+                className="rounded-lg border border-gray-700 px-4 py-3 hover:bg-gray-800 disabled:opacity-50"
+              >
+
+                {locationLoading
+                  ? "Getting location..."
+                  : duplicateLoading
+                  ? "Checking nearby reports..."
+                  : "Use my current location"}
+
+              </button>
+
+              {latitude !== null &&
+                longitude !== null && (
+
+                  <div className="mt-3 rounded-lg bg-gray-800 p-4 text-sm text-gray-300">
+
+                    <p>
+                      Latitude:{" "}
+                      {latitude.toFixed(
+                        6
+                      )}
+                    </p>
+
+                    <p>
+                      Longitude:{" "}
+                      {longitude.toFixed(
+                        6
+                      )}
+                    </p>
+
                   </div>
+                )}
+            </div>
 
-                  <h2 className="text-xl font-bold">
-                    {report.title}
-                  </h2>
+            {/* DUPLICATE CHECK */}
 
-                  <p className="mt-2 line-clamp-3 text-sm leading-6 text-gray-400">
-                    {report.description}
+            {duplicateLoading && (
+              <div className="rounded-xl border border-blue-900 bg-blue-950/30 p-5">
+
+                <p className="font-semibold text-blue-300">
+                  Checking for nearby reports...
+                </p>
+
+                <p className="mt-1 text-sm text-gray-400">
+                  CivicPulse is checking whether this issue may already have been reported nearby.
+                </p>
+
+              </div>
+            )}
+
+            {!duplicateLoading &&
+              checkedForDuplicates &&
+              duplicateMatches.length ===
+                0 && (
+
+                <div className="rounded-xl border border-green-900 bg-green-950/30 p-5">
+
+                  <p className="font-semibold text-green-300">
+                    ✓ No nearby duplicate found
                   </p>
 
-                  <div className="mt-5 flex items-center justify-between text-xs text-gray-500">
-                    <span>
-                      {report.confirmationCount ?? 0} confirmations
-                    </span>
+                  <p className="mt-1 text-sm text-gray-400">
+                    No unresolved {category.toLowerCase()} reports were found within 50 metres.
+                  </p>
 
-                    <span>{formatDate(report)}</span>
-                  </div>
                 </div>
-              </button>
-            ))}
-          </div>
-        )}
+              )}
+
+            {!duplicateLoading &&
+              duplicateMatches.length >
+                0 && (
+
+                <div className="rounded-2xl border border-yellow-700 bg-yellow-950/30 p-5">
+
+                  <h2 className="text-lg font-bold text-yellow-300">
+                    ⚠️ Possible existing report
+                  </h2>
+
+                  <p className="mt-2 text-sm leading-6 text-gray-300">
+                    CivicPulse found a similar unresolved issue nearby. Confirming the existing report is usually better than creating a duplicate.
+                  </p>
+
+                  <div className="mt-5 space-y-3">
+
+                    {duplicateMatches
+                      .slice(
+                        0,
+                        3
+                      )
+                      .map(
+                        (
+                          match
+                        ) => (
+
+                          <div
+                            key={
+                              match.id
+                            }
+                            className="rounded-xl border border-gray-700 bg-gray-900 p-4"
+                          >
+
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+
+                              <div>
+
+                                <p className="font-semibold">
+                                  {
+                                    match.title
+                                  }
+                                </p>
+
+                                <p className="mt-1 text-sm text-gray-400">
+                                  {
+                                    Math.round(
+                                      match.distance
+                                    )
+                                  }{" "}
+                                  metres away
+                                </p>
+
+                                <p className="mt-1 text-sm text-gray-400">
+                                  {
+                                    match.confirmationCount ??
+                                    0
+                                  }{" "}
+                                  confirmations
+                                </p>
+
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  router.push(
+                                    `/report/${match.id}`
+                                  )
+                                }
+                                className="rounded-lg border border-gray-600 px-4 py-2 text-sm font-semibold hover:bg-gray-800"
+                              >
+                                View Existing
+                              </button>
+
+                            </div>
+
+                          </div>
+                        )
+                      )}
+
+                  </div>
+
+                  {!allowDuplicateSubmit ? (
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAllowDuplicateSubmit(
+                          true
+                        );
+
+                        setError("");
+                      }}
+                      className="mt-5 rounded-lg bg-yellow-600 px-5 py-3 font-semibold text-black hover:bg-yellow-500"
+                    >
+                      Continue Anyway
+                    </button>
+
+                  ) : (
+
+                    <div className="mt-5 rounded-lg border border-yellow-700 bg-yellow-900/30 p-4 text-sm text-yellow-200">
+                      You chose to continue with a new report.
+                    </div>
+
+                  )}
+
+                </div>
+              )}
+
+            {/* PHOTO */}
+
+            <div>
+
+              <label className="mb-2 block text-sm font-medium">
+                Photo
+              </label>
+
+              <input
+                type="file"
+                accept="image/*"
+                onChange={
+                  handlePhotoChange
+                }
+                className="block w-full text-sm text-gray-400"
+              />
+
+              {photoPreview && (
+
+                <img
+                  src={
+                    photoPreview
+                  }
+                  alt="Report preview"
+                  className="mt-4 max-h-80 w-full rounded-xl object-cover"
+                />
+
+              )}
+
+            </div>
+
+            {error && (
+
+              <div className="rounded-lg border border-red-900 bg-red-950/50 p-4 text-sm text-red-400">
+                {error}
+              </div>
+
+            )}
+
+            <button
+              type="submit"
+              disabled={
+                loading ||
+                locationLoading ||
+                duplicateLoading
+              }
+              className="w-full rounded-lg bg-blue-600 py-3 font-semibold hover:bg-blue-500 disabled:opacity-50"
+            >
+
+              {loading
+                ? "Submitting report..."
+                : "Submit report"}
+
+            </button>
+
+          </form>
+        </div>
       </div>
     </main>
   );
