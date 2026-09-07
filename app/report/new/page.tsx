@@ -5,9 +5,14 @@ import { useRouter } from "next/navigation";
 
 import {
   addDoc,
+  arrayUnion,
   collection,
+  doc,
+  getDoc,
   getDocs,
+  increment,
   serverTimestamp,
+  updateDoc,
 } from "firebase/firestore";
 
 import { db } from "@/src/lib/firebase";
@@ -39,7 +44,9 @@ type ExistingReport = {
   status: string;
   latitude: number;
   longitude: number;
+  createdBy?: string;
   confirmationCount?: number;
+  confirmedBy?: string[];
 };
 
 type DuplicateMatch = ExistingReport & {
@@ -92,17 +99,10 @@ export default function CreateReportPage() {
     loading: authLoading,
   } = useAuth();
 
-  const [title, setTitle] =
-    useState("");
-
-  const [description, setDescription] =
-    useState("");
-
-  const [category, setCategory] =
-    useState("Pothole");
-
-  const [severity, setSeverity] =
-    useState("medium");
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [category, setCategory] = useState("Pothole");
+  const [severity, setSeverity] = useState("medium");
 
   const [latitude, setLatitude] =
     useState<number | null>(null);
@@ -113,41 +113,24 @@ export default function CreateReportPage() {
   const [photo, setPhoto] =
     useState<File | null>(null);
 
-  const [
-    photoPreview,
-    setPhotoPreview,
-  ] = useState<string | null>(null);
+  const [photoPreview, setPhotoPreview] =
+    useState<string | null>(null);
 
-  const [loading, setLoading] =
+  const [loading, setLoading] = useState(false);
+  const [locationLoading, setLocationLoading] = useState(false);
+  const [duplicateLoading, setDuplicateLoading] = useState(false);
+  const [confirmingId, setConfirmingId] = useState<string | null>(null);
+
+  const [duplicateMatches, setDuplicateMatches] =
+    useState<DuplicateMatch[]>([]);
+
+  const [checkedForDuplicates, setCheckedForDuplicates] =
     useState(false);
 
-  const [
-    locationLoading,
-    setLocationLoading,
-  ] = useState(false);
+  const [allowDuplicateSubmit, setAllowDuplicateSubmit] =
+    useState(false);
 
-  const [
-    duplicateLoading,
-    setDuplicateLoading,
-  ] = useState(false);
-
-  const [
-    duplicateMatches,
-    setDuplicateMatches,
-  ] = useState<DuplicateMatch[]>([]);
-
-  const [
-    checkedForDuplicates,
-    setCheckedForDuplicates,
-  ] = useState(false);
-
-  const [
-    allowDuplicateSubmit,
-    setAllowDuplicateSubmit,
-  ] = useState(false);
-
-  const [error, setError] =
-    useState("");
+  const [error, setError] = useState("");
 
   async function checkForDuplicates(
     currentLatitude: number,
@@ -156,9 +139,7 @@ export default function CreateReportPage() {
   ) {
     try {
       setDuplicateLoading(true);
-
       setDuplicateMatches([]);
-
       setCheckedForDuplicates(false);
 
       const snapshot =
@@ -166,72 +147,53 @@ export default function CreateReportPage() {
           collection(db, "reports")
         );
 
-      const nearbyMatches:
-        DuplicateMatch[] = [];
+      const nearbyMatches: DuplicateMatch[] = [];
 
-      snapshot.docs.forEach(
-        (document) => {
-          const data =
-            document.data() as Omit<
-              ExistingReport,
-              "id"
-            >;
+      snapshot.docs.forEach((document) => {
+        const data =
+          document.data() as Omit<
+            ExistingReport,
+            "id"
+          >;
 
-          if (
-            typeof data.latitude !==
-              "number" ||
-            typeof data.longitude !==
-              "number"
-          ) {
-            return;
-          }
-
-          if (
-            data.category !==
-            currentCategory
-          ) {
-            return;
-          }
-
-          if (
-            data.status ===
-            "resolved"
-          ) {
-            return;
-          }
-
-          const distance =
-            calculateDistanceInMeters(
-              currentLatitude,
-              currentLongitude,
-              data.latitude,
-              data.longitude
-            );
-
-          if (distance <= 50) {
-            nearbyMatches.push({
-              id: document.id,
-              ...data,
-              distance,
-            });
-          }
+        if (
+          typeof data.latitude !== "number" ||
+          typeof data.longitude !== "number"
+        ) {
+          return;
         }
-      );
+
+        if (data.category !== currentCategory) {
+          return;
+        }
+
+        if (data.status === "resolved") {
+          return;
+        }
+
+        const distance =
+          calculateDistanceInMeters(
+            currentLatitude,
+            currentLongitude,
+            data.latitude,
+            data.longitude
+          );
+
+        if (distance <= 50) {
+          nearbyMatches.push({
+            id: document.id,
+            ...data,
+            distance,
+          });
+        }
+      });
 
       nearbyMatches.sort(
-        (a, b) =>
-          a.distance -
-          b.distance
+        (a, b) => a.distance - b.distance
       );
 
-      setDuplicateMatches(
-        nearbyMatches
-      );
-
-      setCheckedForDuplicates(
-        true
-      );
-
+      setDuplicateMatches(nearbyMatches);
+      setCheckedForDuplicates(true);
       setAllowDuplicateSubmit(
         nearbyMatches.length === 0
       );
@@ -253,15 +215,12 @@ export default function CreateReportPage() {
     setLocationLoading(true);
     setError("");
 
-    if (
-      !navigator.geolocation
-    ) {
+    if (!navigator.geolocation) {
       setError(
         "Geolocation is not supported by your browser."
       );
 
       setLocationLoading(false);
-
       return;
     }
 
@@ -273,19 +232,11 @@ export default function CreateReportPage() {
         const currentLongitude =
           position.coords.longitude;
 
-        setLatitude(
-          currentLatitude
-        );
-
-        setLongitude(
-          currentLongitude
-        );
+        setLatitude(currentLatitude);
+        setLongitude(currentLongitude);
 
         setLocationLoading(false);
-
-        setAllowDuplicateSubmit(
-          false
-        );
+        setAllowDuplicateSubmit(false);
 
         await checkForDuplicates(
           currentLatitude,
@@ -305,11 +256,8 @@ export default function CreateReportPage() {
       },
 
       {
-        enableHighAccuracy:
-          true,
-
-        timeout:
-          10000,
+        enableHighAccuracy: true,
+        timeout: 10000,
       }
     );
   }
@@ -319,15 +267,9 @@ export default function CreateReportPage() {
   ) {
     setCategory(newCategory);
 
-    setAllowDuplicateSubmit(
-      false
-    );
-
+    setAllowDuplicateSubmit(false);
     setDuplicateMatches([]);
-
-    setCheckedForDuplicates(
-      false
-    );
+    setCheckedForDuplicates(false);
 
     if (
       latitude !== null &&
@@ -342,8 +284,7 @@ export default function CreateReportPage() {
   }
 
   function handlePhotoChange(
-    event:
-      React.ChangeEvent<HTMLInputElement>
+    event: React.ChangeEvent<HTMLInputElement>
   ) {
     const file =
       event.target.files?.[0];
@@ -355,13 +296,9 @@ export default function CreateReportPage() {
     setPhoto(file);
 
     const preview =
-      URL.createObjectURL(
-        file
-      );
+      URL.createObjectURL(file);
 
-    setPhotoPreview(
-      preview
-    );
+    setPhotoPreview(preview);
   }
 
   async function uploadPhoto() {
@@ -403,11 +340,8 @@ export default function CreateReportPage() {
       await fetch(
         `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`,
         {
-          method:
-            "POST",
-
-          body:
-            formData,
+          method: "POST",
+          body: formData,
         }
       );
 
@@ -421,6 +355,98 @@ export default function CreateReportPage() {
       await response.json();
 
     return data.secure_url as string;
+  }
+
+  async function handleConfirmExisting(
+    match: DuplicateMatch
+  ) {
+    if (!user) {
+      router.push("/login");
+      return;
+    }
+
+    if (match.createdBy === user.uid) {
+      setError(
+        "You cannot confirm your own report."
+      );
+      return;
+    }
+
+    try {
+      setConfirmingId(match.id);
+      setError("");
+
+      const reportRef =
+        doc(
+          db,
+          "reports",
+          match.id
+        );
+
+      const snapshot =
+        await getDoc(reportRef);
+
+      if (!snapshot.exists()) {
+        setError(
+          "That report no longer exists."
+        );
+
+        return;
+      }
+
+      const currentData =
+        snapshot.data();
+
+      const confirmedBy =
+        Array.isArray(
+          currentData.confirmedBy
+        )
+          ? currentData.confirmedBy
+          : [];
+
+      if (
+        confirmedBy.includes(
+          user.uid
+        )
+      ) {
+        setError(
+          "You have already confirmed this report."
+        );
+
+        return;
+      }
+
+      await updateDoc(
+        reportRef,
+        {
+          confirmationCount:
+            increment(1),
+
+          confirmedBy:
+            arrayUnion(
+              user.uid
+            ),
+
+          updatedAt:
+            serverTimestamp(),
+        }
+      );
+
+      router.push(
+        `/report/${match.id}`
+      );
+    } catch (err) {
+      console.error(
+        "Confirm existing error:",
+        err
+      );
+
+      setError(
+        "Failed to confirm the existing report."
+      );
+    } finally {
+      setConfirmingId(null);
+    }
   }
 
   async function handleSubmit(
@@ -459,12 +485,11 @@ export default function CreateReportPage() {
     }
 
     if (
-      duplicateMatches.length >
-        0 &&
+      duplicateMatches.length > 0 &&
       !allowDuplicateSubmit
     ) {
       setError(
-        "A similar nearby report already exists. Review it first or choose Continue Anyway."
+        "A similar nearby report already exists. Confirm it, view it, or choose Continue Anyway."
       );
 
       return;
@@ -483,21 +508,15 @@ export default function CreateReportPage() {
             db,
             "reports"
           ),
-
           {
             title,
-
             description,
-
             category,
-
             severity,
-
             status:
               "submitted",
 
             latitude,
-
             longitude,
 
             imageUrl,
@@ -510,6 +529,8 @@ export default function CreateReportPage() {
 
             confirmationCount:
               0,
+
+            confirmedBy: [],
 
             createdAt:
               serverTimestamp(),
@@ -556,7 +577,6 @@ export default function CreateReportPage() {
     return (
       <main className="min-h-screen flex items-center justify-center bg-gray-950 text-white p-6">
         <div className="text-center">
-
           <h1 className="text-2xl font-bold">
             Login required
           </h1>
@@ -571,7 +591,6 @@ export default function CreateReportPage() {
           >
             Go to login
           </button>
-
         </div>
       </main>
     );
@@ -579,9 +598,7 @@ export default function CreateReportPage() {
 
   return (
     <main className="min-h-screen bg-gray-950 text-white p-6">
-
       <div className="mx-auto max-w-2xl">
-
         <button
           onClick={() =>
             router.back()
@@ -592,7 +609,6 @@ export default function CreateReportPage() {
         </button>
 
         <div className="rounded-2xl border border-gray-800 bg-gray-900 p-8">
-
           <h1 className="text-3xl font-bold">
             Report an Issue
           </h1>
@@ -607,7 +623,6 @@ export default function CreateReportPage() {
             }
             className="mt-8 space-y-6"
           >
-
             <div>
               <label className="mb-2 block text-sm font-medium">
                 Issue title
@@ -628,15 +643,12 @@ export default function CreateReportPage() {
             </div>
 
             <div>
-
               <label className="mb-2 block text-sm font-medium">
                 Category
               </label>
 
               <select
-                value={
-                  category
-                }
+                value={category}
                 onChange={(e) =>
                   handleCategoryChange(
                     e.target.value
@@ -644,7 +656,6 @@ export default function CreateReportPage() {
                 }
                 className="w-full rounded-lg border border-gray-700 bg-gray-800 px-4 py-3 outline-none"
               >
-
                 {categories.map(
                   (item) => (
                     <option
@@ -655,7 +666,6 @@ export default function CreateReportPage() {
                     </option>
                   )
                 )}
-
               </select>
             </div>
 
@@ -665,9 +675,7 @@ export default function CreateReportPage() {
               </label>
 
               <select
-                value={
-                  severity
-                }
+                value={severity}
                 onChange={(e) =>
                   setSeverity(
                     e.target.value
@@ -675,7 +683,6 @@ export default function CreateReportPage() {
                 }
                 className="w-full rounded-lg border border-gray-700 bg-gray-800 px-4 py-3 outline-none"
               >
-
                 {severities.map(
                   (item) => (
                     <option
@@ -685,13 +692,10 @@ export default function CreateReportPage() {
                       {item
                         .charAt(0)
                         .toUpperCase() +
-                        item.slice(
-                          1
-                        )}
+                        item.slice(1)}
                     </option>
                   )
                 )}
-
               </select>
             </div>
 
@@ -701,9 +705,7 @@ export default function CreateReportPage() {
               </label>
 
               <textarea
-                value={
-                  description
-                }
+                value={description}
                 onChange={(e) =>
                   setDescription(
                     e.target.value
@@ -716,10 +718,7 @@ export default function CreateReportPage() {
               />
             </div>
 
-            {/* LOCATION */}
-
             <div>
-
               <label className="mb-2 block text-sm font-medium">
                 Location
               </label>
@@ -735,20 +734,16 @@ export default function CreateReportPage() {
                 }
                 className="rounded-lg border border-gray-700 px-4 py-3 hover:bg-gray-800 disabled:opacity-50"
               >
-
                 {locationLoading
                   ? "Getting location..."
                   : duplicateLoading
                   ? "Checking nearby reports..."
                   : "Use my current location"}
-
               </button>
 
               {latitude !== null &&
                 longitude !== null && (
-
                   <div className="mt-3 rounded-lg bg-gray-800 p-4 text-sm text-gray-300">
-
                     <p>
                       Latitude:{" "}
                       {latitude.toFixed(
@@ -762,16 +757,12 @@ export default function CreateReportPage() {
                         6
                       )}
                     </p>
-
                   </div>
                 )}
             </div>
 
-            {/* DUPLICATE CHECK */}
-
             {duplicateLoading && (
               <div className="rounded-xl border border-blue-900 bg-blue-950/30 p-5">
-
                 <p className="font-semibold text-blue-300">
                   Checking for nearby reports...
                 </p>
@@ -779,17 +770,13 @@ export default function CreateReportPage() {
                 <p className="mt-1 text-sm text-gray-400">
                   CivicPulse is checking whether this issue may already have been reported nearby.
                 </p>
-
               </div>
             )}
 
             {!duplicateLoading &&
               checkedForDuplicates &&
-              duplicateMatches.length ===
-                0 && (
-
+              duplicateMatches.length === 0 && (
                 <div className="rounded-xl border border-green-900 bg-green-950/30 p-5">
-
                   <p className="font-semibold text-green-300">
                     ✓ No nearby duplicate found
                   </p>
@@ -797,72 +784,48 @@ export default function CreateReportPage() {
                   <p className="mt-1 text-sm text-gray-400">
                     No unresolved {category.toLowerCase()} reports were found within 50 metres.
                   </p>
-
                 </div>
               )}
 
             {!duplicateLoading &&
-              duplicateMatches.length >
-                0 && (
-
+              duplicateMatches.length > 0 && (
                 <div className="rounded-2xl border border-yellow-700 bg-yellow-950/30 p-5">
-
                   <h2 className="text-lg font-bold text-yellow-300">
                     ⚠️ Possible existing report
                   </h2>
 
                   <p className="mt-2 text-sm leading-6 text-gray-300">
-                    CivicPulse found a similar unresolved issue nearby. Confirming the existing report is usually better than creating a duplicate.
+                    CivicPulse found a similar unresolved issue nearby.
+                    You can confirm the existing report instead of creating another one.
                   </p>
 
                   <div className="mt-5 space-y-3">
-
                     {duplicateMatches
-                      .slice(
-                        0,
-                        3
-                      )
+                      .slice(0, 3)
                       .map(
-                        (
-                          match
-                        ) => (
-
+                        (match) => (
                           <div
                             key={
                               match.id
                             }
                             className="rounded-xl border border-gray-700 bg-gray-900 p-4"
                           >
+                            <p className="font-semibold">
+                              {match.title}
+                            </p>
 
-                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <p className="mt-1 text-sm text-gray-400">
+                              {Math.round(
+                                match.distance
+                              )}{" "}
+                              metres away
+                            </p>
 
-                              <div>
+                            <p className="mt-1 text-sm text-gray-400">
+                              {match.confirmationCount ?? 0} confirmations
+                            </p>
 
-                                <p className="font-semibold">
-                                  {
-                                    match.title
-                                  }
-                                </p>
-
-                                <p className="mt-1 text-sm text-gray-400">
-                                  {
-                                    Math.round(
-                                      match.distance
-                                    )
-                                  }{" "}
-                                  metres away
-                                </p>
-
-                                <p className="mt-1 text-sm text-gray-400">
-                                  {
-                                    match.confirmationCount ??
-                                    0
-                                  }{" "}
-                                  confirmations
-                                </p>
-
-                              </div>
-
+                            <div className="mt-4 flex flex-wrap gap-3">
                               <button
                                 type="button"
                                 onClick={() =>
@@ -875,45 +838,52 @@ export default function CreateReportPage() {
                                 View Existing
                               </button>
 
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleConfirmExisting(
+                                    match
+                                  )
+                                }
+                                disabled={
+                                  confirmingId ===
+                                  match.id
+                                }
+                                className="rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold hover:bg-green-500 disabled:opacity-50"
+                              >
+                                {confirmingId ===
+                                match.id
+                                  ? "Confirming..."
+                                  : "Confirm Existing"}
+                              </button>
                             </div>
-
                           </div>
                         )
                       )}
-
                   </div>
 
                   {!allowDuplicateSubmit ? (
-
                     <button
                       type="button"
                       onClick={() => {
                         setAllowDuplicateSubmit(
                           true
                         );
-
                         setError("");
                       }}
                       className="mt-5 rounded-lg bg-yellow-600 px-5 py-3 font-semibold text-black hover:bg-yellow-500"
                     >
                       Continue Anyway
                     </button>
-
                   ) : (
-
                     <div className="mt-5 rounded-lg border border-yellow-700 bg-yellow-900/30 p-4 text-sm text-yellow-200">
                       You chose to continue with a new report.
                     </div>
-
                   )}
-
                 </div>
               )}
 
-            {/* PHOTO */}
-
             <div>
-
               <label className="mb-2 block text-sm font-medium">
                 Photo
               </label>
@@ -928,7 +898,6 @@ export default function CreateReportPage() {
               />
 
               {photoPreview && (
-
                 <img
                   src={
                     photoPreview
@@ -936,17 +905,13 @@ export default function CreateReportPage() {
                   alt="Report preview"
                   className="mt-4 max-h-80 w-full rounded-xl object-cover"
                 />
-
               )}
-
             </div>
 
             {error && (
-
               <div className="rounded-lg border border-red-900 bg-red-950/50 p-4 text-sm text-red-400">
                 {error}
               </div>
-
             )}
 
             <button
@@ -958,13 +923,10 @@ export default function CreateReportPage() {
               }
               className="w-full rounded-lg bg-blue-600 py-3 font-semibold hover:bg-blue-500 disabled:opacity-50"
             >
-
               {loading
                 ? "Submitting report..."
                 : "Submit report"}
-
             </button>
-
           </form>
         </div>
       </div>
