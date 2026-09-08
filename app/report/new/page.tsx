@@ -116,10 +116,17 @@ export default function CreateReportPage() {
   const [photoPreview, setPhotoPreview] =
     useState<string | null>(null);
 
-  const [loading, setLoading] = useState(false);
-  const [locationLoading, setLocationLoading] = useState(false);
-  const [duplicateLoading, setDuplicateLoading] = useState(false);
-  const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  const [loading, setLoading] =
+    useState(false);
+
+  const [locationLoading, setLocationLoading] =
+    useState(false);
+
+  const [duplicateLoading, setDuplicateLoading] =
+    useState(false);
+
+  const [confirmingId, setConfirmingId] =
+    useState<string | null>(null);
 
   const [duplicateMatches, setDuplicateMatches] =
     useState<DuplicateMatch[]>([]);
@@ -130,7 +137,8 @@ export default function CreateReportPage() {
   const [allowDuplicateSubmit, setAllowDuplicateSubmit] =
     useState(false);
 
-  const [error, setError] = useState("");
+  const [error, setError] =
+    useState("");
 
   async function checkForDuplicates(
     currentLatitude: number,
@@ -163,11 +171,15 @@ export default function CreateReportPage() {
           return;
         }
 
-        if (data.category !== currentCategory) {
+        if (
+          data.category !== currentCategory
+        ) {
           return;
         }
 
-        if (data.status === "resolved") {
+        if (
+          data.status === "resolved"
+        ) {
           return;
         }
 
@@ -189,11 +201,18 @@ export default function CreateReportPage() {
       });
 
       nearbyMatches.sort(
-        (a, b) => a.distance - b.distance
+        (a, b) =>
+          a.distance - b.distance
       );
 
-      setDuplicateMatches(nearbyMatches);
-      setCheckedForDuplicates(true);
+      setDuplicateMatches(
+        nearbyMatches
+      );
+
+      setCheckedForDuplicates(
+        true
+      );
+
       setAllowDuplicateSubmit(
         nearbyMatches.length === 0
       );
@@ -232,8 +251,13 @@ export default function CreateReportPage() {
         const currentLongitude =
           position.coords.longitude;
 
-        setLatitude(currentLatitude);
-        setLongitude(currentLongitude);
+        setLatitude(
+          currentLatitude
+        );
+
+        setLongitude(
+          currentLongitude
+        );
 
         setLocationLoading(false);
         setAllowDuplicateSubmit(false);
@@ -365,15 +389,21 @@ export default function CreateReportPage() {
       return;
     }
 
-    if (match.createdBy === user.uid) {
+    if (
+      match.createdBy === user.uid
+    ) {
       setError(
         "You cannot confirm your own report."
       );
+
       return;
     }
 
     try {
-      setConfirmingId(match.id);
+      setConfirmingId(
+        match.id
+      );
+
       setError("");
 
       const reportRef =
@@ -384,7 +414,9 @@ export default function CreateReportPage() {
         );
 
       const snapshot =
-        await getDoc(reportRef);
+        await getDoc(
+          reportRef
+        );
 
       if (!snapshot.exists()) {
         setError(
@@ -510,13 +542,31 @@ export default function CreateReportPage() {
           ),
           {
             title,
+
             description,
+
             category,
+
             severity,
+
             status:
               "submitted",
 
+            statusHistory: [
+              {
+                status:
+                  "submitted",
+
+                changedAt:
+                  new Date(),
+
+                changedBy:
+                  user.uid,
+              },
+            ],
+
             latitude,
+
             longitude,
 
             imageUrl,
@@ -705,7 +755,9 @@ export default function CreateReportPage() {
               </label>
 
               <textarea
-                value={description}
+                value={
+                  description
+                }
                 onChange={(e) =>
                   setDescription(
                     e.target.value
@@ -802,64 +854,59 @@ export default function CreateReportPage() {
                   <div className="mt-5 space-y-3">
                     {duplicateMatches
                       .slice(0, 3)
-                      .map(
-                        (match) => (
-                          <div
-                            key={
-                              match.id
-                            }
-                            className="rounded-xl border border-gray-700 bg-gray-900 p-4"
-                          >
-                            <p className="font-semibold">
-                              {match.title}
-                            </p>
+                      .map((match) => (
+                        <div
+                          key={match.id}
+                          className="rounded-xl border border-gray-700 bg-gray-900 p-4"
+                        >
+                          <p className="font-semibold">
+                            {match.title}
+                          </p>
 
-                            <p className="mt-1 text-sm text-gray-400">
-                              {Math.round(
-                                match.distance
-                              )}{" "}
-                              metres away
-                            </p>
+                          <p className="mt-1 text-sm text-gray-400">
+                            {Math.round(
+                              match.distance
+                            )}{" "}
+                            metres away
+                          </p>
 
-                            <p className="mt-1 text-sm text-gray-400">
-                              {match.confirmationCount ?? 0} confirmations
-                            </p>
+                          <p className="mt-1 text-sm text-gray-400">
+                            {match.confirmationCount ?? 0} confirmations
+                          </p>
 
-                            <div className="mt-4 flex flex-wrap gap-3">
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  router.push(
-                                    `/report/${match.id}`
-                                  )
-                                }
-                                className="rounded-lg border border-gray-600 px-4 py-2 text-sm font-semibold hover:bg-gray-800"
-                              >
-                                View Existing
-                              </button>
+                          <div className="mt-4 flex flex-wrap gap-3">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                router.push(
+                                  `/report/${match.id}`
+                                )
+                              }
+                              className="rounded-lg border border-gray-600 px-4 py-2 text-sm font-semibold hover:bg-gray-800"
+                            >
+                              View Existing
+                            </button>
 
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  handleConfirmExisting(
-                                    match
-                                  )
-                                }
-                                disabled={
-                                  confirmingId ===
-                                  match.id
-                                }
-                                className="rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold hover:bg-green-500 disabled:opacity-50"
-                              >
-                                {confirmingId ===
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleConfirmExisting(
+                                  match
+                                )
+                              }
+                              disabled={
+                                confirmingId ===
                                 match.id
-                                  ? "Confirming..."
-                                  : "Confirm Existing"}
-                              </button>
-                            </div>
+                              }
+                              className="rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold hover:bg-green-500 disabled:opacity-50"
+                            >
+                              {confirmingId === match.id
+                                ? "Confirming..."
+                                : "Confirm Existing"}
+                            </button>
                           </div>
-                        )
-                      )}
+                        </div>
+                      ))}
                   </div>
 
                   {!allowDuplicateSubmit ? (
@@ -869,6 +916,7 @@ export default function CreateReportPage() {
                         setAllowDuplicateSubmit(
                           true
                         );
+
                         setError("");
                       }}
                       className="mt-5 rounded-lg bg-yellow-600 px-5 py-3 font-semibold text-black hover:bg-yellow-500"
