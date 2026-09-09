@@ -45,12 +45,11 @@ export default function DashboardPage() {
       setProfileLoading(true);
       setError("");
 
-      const userRef =
-        doc(
-          db,
-          "users",
-          user.uid
-        );
+      const userRef = doc(
+        db,
+        "users",
+        user.uid
+      );
 
       const snapshot =
         await getDoc(userRef);
@@ -158,6 +157,9 @@ export default function DashboardPage() {
     role === "staff" ||
     role === "admin";
 
+  const isAdmin =
+    role === "admin";
+
   const displayName =
     profile?.name?.trim() ||
     user.email?.split("@")[0] ||
@@ -231,45 +233,68 @@ export default function DashboardPage() {
         </section>
 
         {isStaff && (
-          <section className="mt-8">
+          <section className="mt-8 grid gap-4 lg:grid-cols-2">
             <button
               type="button"
               onClick={() =>
                 router.push(
-                  "/admin"
+                  "/staff"
                 )
               }
-              className="group w-full rounded-2xl border border-blue-800 bg-gradient-to-r from-blue-950/70 to-gray-900 p-6 text-left transition hover:border-blue-500"
+              className="group rounded-2xl border border-indigo-800 bg-indigo-950/20 p-6 text-left transition hover:border-indigo-500"
             >
-              <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex items-start gap-4">
-                  <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-blue-800 bg-blue-950 text-2xl">
-                    🛡️
-                  </div>
-
-                  <div>
-                    <div className="flex flex-wrap items-center gap-3">
-                      <h3 className="text-xl font-bold">
-                        CivicPulse Operations
-                      </h3>
-
-                      <span className="rounded-full bg-blue-600 px-2.5 py-1 text-xs font-bold uppercase tracking-wider">
-                        Staff
-                      </span>
-                    </div>
-
-                    <p className="mt-2 max-w-2xl text-sm leading-6 text-gray-400">
-                      Review incoming reports, prioritise critical cases,
-                      manage report statuses and monitor community issues.
-                    </p>
-                  </div>
+              <div className="flex items-start gap-4">
+                <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-indigo-950 text-2xl">
+                  🗂️
                 </div>
 
-                <div className="text-2xl text-blue-400 transition group-hover:translate-x-1">
-                  →
+                <div className="flex-1">
+                  <h3 className="text-xl font-bold">
+                    My Assigned Cases
+                  </h3>
+
+                  <p className="mt-2 text-sm leading-6 text-gray-400">
+                    View and manage reports assigned directly to you.
+                  </p>
+
+                  <p className="mt-4 font-semibold text-indigo-400">
+                    Open cases →
+                  </p>
                 </div>
               </div>
             </button>
+
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={() =>
+                  router.push(
+                    "/admin"
+                  )
+                }
+                className="group rounded-2xl border border-blue-800 bg-blue-950/20 p-6 text-left transition hover:border-blue-500"
+              >
+                <div className="flex items-start gap-4">
+                  <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-blue-950 text-2xl">
+                    🛡️
+                  </div>
+
+                  <div className="flex-1">
+                    <h3 className="text-xl font-bold">
+                      CivicPulse Operations
+                    </h3>
+
+                    <p className="mt-2 text-sm leading-6 text-gray-400">
+                      Review all reports, prioritise cases and manage assignments.
+                    </p>
+
+                    <p className="mt-4 font-semibold text-blue-400">
+                      Open operations →
+                    </p>
+                  </div>
+                </div>
+              </button>
+            )}
           </section>
         )}
 
@@ -281,9 +306,9 @@ export default function DashboardPage() {
                 "/report/new"
               )
             }
-            className="group rounded-2xl border border-gray-800 bg-gray-900 p-6 text-left transition hover:border-blue-600 hover:bg-gray-900/80"
+            className="group rounded-2xl border border-gray-800 bg-gray-900 p-6 text-left transition hover:border-blue-600"
           >
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-950 text-2xl">
+            <div className="text-3xl">
               ➕
             </div>
 
@@ -292,14 +317,7 @@ export default function DashboardPage() {
             </h3>
 
             <p className="mt-2 text-sm leading-6 text-gray-400">
-              Submit a new community problem with a photo and GPS location.
-            </p>
-
-            <p className="mt-5 font-semibold text-blue-400">
-              Create report{" "}
-              <span className="inline-block transition group-hover:translate-x-1">
-                →
-              </span>
+              Submit a new community issue with photo and location.
             </p>
           </button>
 
@@ -310,9 +328,9 @@ export default function DashboardPage() {
                 "/reports"
               )
             }
-            className="group rounded-2xl border border-gray-800 bg-gray-900 p-6 text-left transition hover:border-purple-600 hover:bg-gray-900/80"
+            className="group rounded-2xl border border-gray-800 bg-gray-900 p-6 text-left transition hover:border-purple-600"
           >
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-purple-950 text-2xl">
+            <div className="text-3xl">
               📋
             </div>
 
@@ -321,15 +339,7 @@ export default function DashboardPage() {
             </h3>
 
             <p className="mt-2 text-sm leading-6 text-gray-400">
-              View issues submitted by residents and confirm problems you
-              have also seen.
-            </p>
-
-            <p className="mt-5 font-semibold text-purple-400">
-              Explore reports{" "}
-              <span className="inline-block transition group-hover:translate-x-1">
-                →
-              </span>
+              Explore issues reported by the community.
             </p>
           </button>
 
@@ -340,9 +350,9 @@ export default function DashboardPage() {
                 "/my-reports"
               )
             }
-            className="group rounded-2xl border border-gray-800 bg-gray-900 p-6 text-left transition hover:border-green-600 hover:bg-gray-900/80"
+            className="group rounded-2xl border border-gray-800 bg-gray-900 p-6 text-left transition hover:border-green-600"
           >
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-green-950 text-2xl">
+            <div className="text-3xl">
               🗂️
             </div>
 
@@ -351,15 +361,7 @@ export default function DashboardPage() {
             </h3>
 
             <p className="mt-2 text-sm leading-6 text-gray-400">
-              Track the issues you have personally submitted and follow
-              their progress.
-            </p>
-
-            <p className="mt-5 font-semibold text-green-400">
-              View my reports{" "}
-              <span className="inline-block transition group-hover:translate-x-1">
-                →
-              </span>
+              Track issues you personally submitted.
             </p>
           </button>
 
@@ -370,9 +372,9 @@ export default function DashboardPage() {
                 "/map"
               )
             }
-            className="group rounded-2xl border border-gray-800 bg-gray-900 p-6 text-left transition hover:border-orange-600 hover:bg-gray-900/80"
+            className="group rounded-2xl border border-gray-800 bg-gray-900 p-6 text-left transition hover:border-orange-600"
           >
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-orange-950 text-2xl">
+            <div className="text-3xl">
               🗺️
             </div>
 
@@ -381,93 +383,9 @@ export default function DashboardPage() {
             </h3>
 
             <p className="mt-2 text-sm leading-6 text-gray-400">
-              Explore reported issues geographically using the CivicPulse
-              live map.
-            </p>
-
-            <p className="mt-5 font-semibold text-orange-400">
-              Open map{" "}
-              <span className="inline-block transition group-hover:translate-x-1">
-                →
-              </span>
+              View reported issues geographically.
             </p>
           </button>
-        </section>
-
-        <section className="mt-10 grid gap-5 lg:grid-cols-3">
-          <div className="rounded-2xl border border-gray-800 bg-gray-900 p-6">
-            <div className="text-3xl">
-              📍
-            </div>
-
-            <h3 className="mt-4 text-lg font-bold">
-              Location Based
-            </h3>
-
-            <p className="mt-2 text-sm leading-6 text-gray-400">
-              Reports use GPS coordinates so communities can see exactly
-              where an issue is happening.
-            </p>
-          </div>
-
-          <div className="rounded-2xl border border-gray-800 bg-gray-900 p-6">
-            <div className="text-3xl">
-              🤝
-            </div>
-
-            <h3 className="mt-4 text-lg font-bold">
-              Community Confirmed
-            </h3>
-
-            <p className="mt-2 text-sm leading-6 text-gray-400">
-              Nearby residents can confirm existing reports, helping
-              organisations identify issues affecting more people.
-            </p>
-          </div>
-
-          <div className="rounded-2xl border border-gray-800 bg-gray-900 p-6">
-            <div className="text-3xl">
-              📈
-            </div>
-
-            <h3 className="mt-4 text-lg font-bold">
-              Trackable Progress
-            </h3>
-
-            <p className="mt-2 text-sm leading-6 text-gray-400">
-              Every report can move from submission through acknowledgement,
-              action and eventual resolution.
-            </p>
-          </div>
-        </section>
-
-        <section className="mt-10 rounded-2xl border border-gray-800 bg-gray-900 p-6">
-          <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-sm font-semibold uppercase tracking-wider text-gray-500">
-                CivicPulse Development
-              </p>
-
-              <h3 className="mt-2 text-xl font-bold">
-                Community issue management platform
-              </h3>
-
-              <p className="mt-2 max-w-3xl text-sm leading-6 text-gray-400">
-                CivicPulse is being built to help residents and organisations
-                report, verify, manage and resolve real community problems.
-              </p>
-            </div>
-
-            <div className="rounded-xl border border-gray-700 bg-gray-950 px-4 py-3 text-center">
-              <p className="text-xs uppercase tracking-wider text-gray-500">
-                Your role
-              </p>
-
-              <p className="mt-1 font-bold capitalize text-blue-300">
-                {role}
-              </p>
-            </div>
-          </div>
         </section>
       </div>
     </main>

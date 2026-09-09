@@ -1,15 +1,26 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import {
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 
 import {
+  useParams,
+  useRouter,
+} from "next/navigation";
+
+import {
+  addDoc,
   arrayUnion,
   collection,
   doc,
   getDoc,
   getDocs,
   increment,
+  orderBy,
+  query,
   serverTimestamp,
   Timestamp,
   updateDoc,
@@ -59,26 +70,52 @@ type UserProfile = {
   role?: string;
 };
 
+type CaseNote = {
+  id: string;
+  text: string;
+  createdBy: string;
+  createdByName: string;
+  createdAt?: Timestamp | null;
+};
+
+type PublicComment = {
+  id: string;
+  text: string;
+  createdBy: string;
+  createdByName: string;
+  role: string;
+  createdAt?: Timestamp | null;
+};
+
 function getStatusLabel(status: string) {
   switch (status) {
     case "submitted":
       return "Submitted";
+
     case "verified":
       return "Verified";
+
     case "acknowledged":
       return "Acknowledged";
+
     case "assigned":
       return "Assigned";
+
     case "in-progress":
       return "In Progress";
+
     case "resolved":
       return "Resolved";
+
     case "rejected":
       return "Rejected";
+
     case "duplicate":
       return "Duplicate";
+
     case "reopened":
       return "Reopened";
+
     default:
       return status;
   }
@@ -88,22 +125,31 @@ function getStatusIcon(status: string) {
   switch (status) {
     case "submitted":
       return "📝";
+
     case "verified":
       return "✅";
+
     case "acknowledged":
       return "👀";
+
     case "assigned":
       return "👤";
+
     case "in-progress":
       return "🛠️";
+
     case "resolved":
       return "🎉";
+
     case "rejected":
       return "❌";
+
     case "duplicate":
       return "📎";
+
     case "reopened":
       return "🔄";
+
     default:
       return "●";
   }
@@ -113,20 +159,80 @@ function getStatusBadgeClasses(status: string) {
   switch (status) {
     case "submitted":
       return "bg-blue-950 text-blue-300";
+
     case "acknowledged":
       return "bg-purple-950 text-purple-300";
+
     case "assigned":
       return "bg-indigo-950 text-indigo-300";
+
     case "in-progress":
       return "bg-yellow-950 text-yellow-300";
+
     case "resolved":
       return "bg-green-950 text-green-300";
+
     case "reopened":
       return "bg-orange-950 text-orange-300";
+
     case "rejected":
       return "bg-red-950 text-red-300";
+
     default:
       return "bg-gray-800 text-gray-300";
+  }
+}
+
+function getSeverityBadgeClasses(severity: string) {
+  switch (severity) {
+    case "critical":
+      return "bg-red-950 text-red-300";
+
+    case "high":
+      return "bg-orange-950 text-orange-300";
+
+    case "medium":
+      return "bg-yellow-950 text-yellow-300";
+
+    case "low":
+      return "bg-green-950 text-green-300";
+
+    default:
+      return "bg-gray-800 text-gray-300";
+  }
+}
+
+function getRoleBadgeClasses(role: string) {
+  switch (
+    role
+      .toLowerCase()
+      .trim()
+  ) {
+    case "admin":
+      return "border-blue-800 bg-blue-950/40 text-blue-300";
+
+    case "staff":
+      return "border-indigo-800 bg-indigo-950/40 text-indigo-300";
+
+    default:
+      return "border-gray-700 bg-gray-800 text-gray-300";
+  }
+}
+
+function getRoleLabel(role: string) {
+  switch (
+    role
+      .toLowerCase()
+      .trim()
+  ) {
+    case "admin":
+      return "Admin";
+
+    case "staff":
+      return "Staff";
+
+    default:
+      return "Resident";
   }
 }
 
@@ -145,7 +251,9 @@ function formatTimestamp(
     typeof value === "object" &&
     typeof value.toDate === "function"
   ) {
-    return value.toDate().toLocaleString();
+    return value
+      .toDate()
+      .toLocaleString();
   }
 
   return "Time unavailable";
@@ -160,43 +268,116 @@ export default function ReportDetailsPage() {
     loading: authLoading,
   } = useAuth();
 
-  const reportId = params.id as string;
+  const reportId =
+    params.id as string;
 
-  const [report, setReport] =
-    useState<Report | null>(null);
+  const [
+    report,
+    setReport,
+  ] = useState<Report | null>(
+    null
+  );
 
-  const [profile, setProfile] =
-    useState<UserProfile | null>(null);
+  const [
+    profile,
+    setProfile,
+  ] =
+    useState<UserProfile | null>(
+      null
+    );
 
-  const [staffMembers, setStaffMembers] =
+  const [
+    staffMembers,
+    setStaffMembers,
+  ] =
     useState<UserProfile[]>([]);
 
-  const [selectedStaffId, setSelectedStaffId] =
-    useState("");
+  const [
+    selectedStaffId,
+    setSelectedStaffId,
+  ] = useState("");
 
-  const [loading, setLoading] =
-    useState(true);
+  const [
+    caseNotes,
+    setCaseNotes,
+  ] =
+    useState<CaseNote[]>([]);
 
-  const [profileLoading, setProfileLoading] =
-    useState(true);
+  const [
+    publicComments,
+    setPublicComments,
+  ] =
+    useState<PublicComment[]>([]);
 
-  const [staffLoading, setStaffLoading] =
-    useState(false);
+  const [
+    newNote,
+    setNewNote,
+  ] = useState("");
 
-  const [confirming, setConfirming] =
-    useState(false);
+  const [
+    newComment,
+    setNewComment,
+  ] = useState("");
 
-  const [updatingStatus, setUpdatingStatus] =
-    useState(false);
+  const [
+    loading,
+    setLoading,
+  ] = useState(true);
 
-  const [assigning, setAssigning] =
-    useState(false);
+  const [
+    profileLoading,
+    setProfileLoading,
+  ] = useState(true);
 
-  const [error, setError] =
-    useState("");
+  const [
+    staffLoading,
+    setStaffLoading,
+  ] = useState(false);
 
-  const [success, setSuccess] =
-    useState("");
+  const [
+    notesLoading,
+    setNotesLoading,
+  ] = useState(false);
+
+  const [
+    commentsLoading,
+    setCommentsLoading,
+  ] = useState(false);
+
+  const [
+    confirming,
+    setConfirming,
+  ] = useState(false);
+
+  const [
+    updatingStatus,
+    setUpdatingStatus,
+  ] = useState(false);
+
+  const [
+    assigning,
+    setAssigning,
+  ] = useState(false);
+
+  const [
+    addingNote,
+    setAddingNote,
+  ] = useState(false);
+
+  const [
+    addingComment,
+    setAddingComment,
+  ] = useState(false);
+
+  const [
+    error,
+    setError,
+  ] = useState("");
+
+  const [
+    success,
+    setSuccess,
+  ] = useState("");
 
   async function loadReport() {
     if (!reportId) {
@@ -206,18 +387,23 @@ export default function ReportDetailsPage() {
     try {
       setLoading(true);
 
-      const reportRef = doc(
-        db,
-        "reports",
-        reportId
-      );
+      const reportRef =
+        doc(
+          db,
+          "reports",
+          reportId
+        );
 
       const snapshot =
         await getDoc(reportRef);
 
       if (!snapshot.exists()) {
         setReport(null);
-        setError("Report not found.");
+
+        setError(
+          "Report not found."
+        );
+
         return;
       }
 
@@ -253,11 +439,12 @@ export default function ReportDetailsPage() {
     try {
       setProfileLoading(true);
 
-      const userRef = doc(
-        db,
-        "users",
-        user.uid
-      );
+      const userRef =
+        doc(
+          db,
+          "users",
+          user.uid
+        );
 
       const snapshot =
         await getDoc(userRef);
@@ -265,7 +452,8 @@ export default function ReportDetailsPage() {
       if (!snapshot.exists()) {
         setProfile({
           uid: user.uid,
-          email: user.email ?? "",
+          email:
+            user.email ?? "",
           role: "resident",
         });
 
@@ -283,7 +471,8 @@ export default function ReportDetailsPage() {
 
       setProfile({
         uid: user.uid,
-        email: user.email ?? "",
+        email:
+          user.email ?? "",
         role: "resident",
       });
     } finally {
@@ -309,35 +498,41 @@ export default function ReportDetailsPage() {
             (item) =>
               item.data() as UserProfile
           )
-          .filter((member) => {
-            const role =
-              member.role
-                ?.toLowerCase()
-                .trim();
+          .filter(
+            (member) => {
+              const role =
+                member.role
+                  ?.toLowerCase()
+                  .trim();
 
-            return (
-              role === "staff" ||
-              role === "admin"
-            );
-          });
+              return (
+                role === "staff" ||
+                role === "admin"
+              );
+            }
+          );
 
-      members.sort((a, b) => {
-        const aName =
-          a.name ||
-          a.email ||
-          "";
+      members.sort(
+        (a, b) => {
+          const aName =
+            a.name ||
+            a.email ||
+            "";
 
-        const bName =
-          b.name ||
-          b.email ||
-          "";
+          const bName =
+            b.name ||
+            b.email ||
+            "";
 
-        return aName.localeCompare(
-          bName
-        );
-      });
+          return aName.localeCompare(
+            bName
+          );
+        }
+      );
 
-      setStaffMembers(members);
+      setStaffMembers(
+        members
+      );
     } catch (err) {
       console.error(
         "Load staff error:",
@@ -352,9 +547,115 @@ export default function ReportDetailsPage() {
     }
   }
 
+  async function loadCaseNotes() {
+    if (!reportId) {
+      return;
+    }
+
+    try {
+      setNotesLoading(true);
+
+      const notesQuery =
+        query(
+          collection(
+            db,
+            "reports",
+            reportId,
+            "caseNotes"
+          ),
+          orderBy(
+            "createdAt",
+            "desc"
+          )
+        );
+
+      const snapshot =
+        await getDocs(
+          notesQuery
+        );
+
+      const notes =
+        snapshot.docs.map(
+          (noteDoc) => ({
+            id: noteDoc.id,
+            ...noteDoc.data(),
+          })
+        ) as CaseNote[];
+
+      setCaseNotes(
+        notes
+      );
+    } catch (err) {
+      console.error(
+        "Load case notes error:",
+        err
+      );
+
+      setError(
+        "Unable to load internal case notes."
+      );
+    } finally {
+      setNotesLoading(false);
+    }
+  }
+
+  async function loadPublicComments() {
+    if (!reportId) {
+      return;
+    }
+
+    try {
+      setCommentsLoading(true);
+
+      const commentsQuery =
+        query(
+          collection(
+            db,
+            "reports",
+            reportId,
+            "comments"
+          ),
+          orderBy(
+            "createdAt",
+            "asc"
+          )
+        );
+
+      const snapshot =
+        await getDocs(
+          commentsQuery
+        );
+
+      const comments =
+        snapshot.docs.map(
+          (commentDoc) => ({
+            id:
+              commentDoc.id,
+            ...commentDoc.data(),
+          })
+        ) as PublicComment[];
+
+      setPublicComments(
+        comments
+      );
+    } catch (err) {
+      console.error(
+        "Load public comments error:",
+        err
+      );
+
+      setError(
+        "Unable to load public comments."
+      );
+    } finally {
+      setCommentsLoading(false);
+    }
+  }
+
   useEffect(() => {
     if (reportId) {
       loadReport();
+      loadPublicComments();
     }
   }, [reportId]);
 
@@ -370,21 +671,32 @@ export default function ReportDetailsPage() {
   const userRole =
     profile?.role
       ?.toLowerCase()
-      .trim();
+      .trim() ||
+    "resident";
 
   const isStaff =
     userRole === "staff" ||
     userRole === "admin";
 
+  const isAdmin =
+    userRole === "admin";
+
   useEffect(() => {
     if (isStaff) {
       loadStaffMembers();
+      loadCaseNotes();
     }
-  }, [isStaff]);
+  }, [
+    isStaff,
+    reportId,
+  ]);
 
   async function handleConfirm() {
     if (!user) {
-      router.push("/login");
+      router.push(
+        "/login"
+      );
+
       return;
     }
 
@@ -393,7 +705,8 @@ export default function ReportDetailsPage() {
     }
 
     if (
-      report.createdBy === user.uid
+      report.createdBy ===
+      user.uid
     ) {
       setError(
         "You cannot confirm your own report."
@@ -419,11 +732,12 @@ export default function ReportDetailsPage() {
       setError("");
       setSuccess("");
 
-      const reportRef = doc(
-        db,
-        "reports",
-        reportId
-      );
+      const reportRef =
+        doc(
+          db,
+          "reports",
+          reportId
+        );
 
       await updateDoc(
         reportRef,
@@ -467,6 +781,7 @@ export default function ReportDetailsPage() {
       setError(
         "You must be logged in."
       );
+
       return;
     }
 
@@ -474,6 +789,7 @@ export default function ReportDetailsPage() {
       setError(
         "You do not have permission to update report statuses."
       );
+
       return;
     }
 
@@ -499,11 +815,12 @@ export default function ReportDetailsPage() {
       setError("");
       setSuccess("");
 
-      const reportRef = doc(
-        db,
-        "reports",
-        reportId
-      );
+      const reportRef =
+        doc(
+          db,
+          "reports",
+          reportId
+        );
 
       await updateDoc(
         reportRef,
@@ -554,6 +871,7 @@ export default function ReportDetailsPage() {
       setError(
         "You must be logged in."
       );
+
       return;
     }
 
@@ -561,6 +879,20 @@ export default function ReportDetailsPage() {
       setError(
         "You do not have permission to assign reports."
       );
+
+      return;
+    }
+
+    /*
+     * FIX:
+     * TypeScript must know the report exists
+     * before report.status is accessed.
+     */
+    if (!report) {
+      setError(
+        "Report data is not available."
+      );
+
       return;
     }
 
@@ -568,6 +900,7 @@ export default function ReportDetailsPage() {
       setError(
         "Please choose a staff member."
       );
+
       return;
     }
 
@@ -582,6 +915,7 @@ export default function ReportDetailsPage() {
       setError(
         "Selected staff member could not be found."
       );
+
       return;
     }
 
@@ -590,11 +924,12 @@ export default function ReportDetailsPage() {
       setError("");
       setSuccess("");
 
-      const reportRef = doc(
-        db,
-        "reports",
-        reportId
-      );
+      const reportRef =
+        doc(
+          db,
+          "reports",
+          reportId
+        );
 
       const assigneeName =
         selectedMember.name?.trim() ||
@@ -619,7 +954,7 @@ export default function ReportDetailsPage() {
       };
 
       if (
-        report?.status !==
+        report.status !==
         "assigned"
       ) {
         updateData.status =
@@ -671,6 +1006,7 @@ export default function ReportDetailsPage() {
       setError(
         "You do not have permission to unassign reports."
       );
+
       return;
     }
 
@@ -679,18 +1015,25 @@ export default function ReportDetailsPage() {
       setError("");
       setSuccess("");
 
-      const reportRef = doc(
-        db,
-        "reports",
-        reportId
-      );
+      const reportRef =
+        doc(
+          db,
+          "reports",
+          reportId
+        );
 
       await updateDoc(
         reportRef,
         {
-          assignedTo: null,
-          assignedToName: null,
-          assignedAt: null,
+          assignedTo:
+            null,
+
+          assignedToName:
+            null,
+
+          assignedAt:
+            null,
+
           updatedAt:
             serverTimestamp(),
         }
@@ -714,6 +1057,186 @@ export default function ReportDetailsPage() {
       );
     } finally {
       setAssigning(false);
+    }
+  }
+
+  async function handleAddCaseNote() {
+    if (!user) {
+      setError(
+        "You must be logged in."
+      );
+
+      return;
+    }
+
+    if (!isStaff) {
+      setError(
+        "You do not have permission to add case notes."
+      );
+
+      return;
+    }
+
+    const trimmedNote =
+      newNote.trim();
+
+    if (!trimmedNote) {
+      setError(
+        "Please write a case note first."
+      );
+
+      return;
+    }
+
+    if (
+      trimmedNote.length >
+      2000
+    ) {
+      setError(
+        "Case notes cannot exceed 2000 characters."
+      );
+
+      return;
+    }
+
+    try {
+      setAddingNote(true);
+      setError("");
+      setSuccess("");
+
+      const authorName =
+        profile?.name?.trim() ||
+        profile?.email ||
+        user.email ||
+        "Staff Member";
+
+      await addDoc(
+        collection(
+          db,
+          "reports",
+          reportId,
+          "caseNotes"
+        ),
+        {
+          text:
+            trimmedNote,
+
+          createdBy:
+            user.uid,
+
+          createdByName:
+            authorName,
+
+          createdAt:
+            serverTimestamp(),
+        }
+      );
+
+      setNewNote("");
+
+      setSuccess(
+        "Internal case note added."
+      );
+
+      await loadCaseNotes();
+    } catch (err) {
+      console.error(
+        "Add case note error:",
+        err
+      );
+
+      setError(
+        "Failed to add the case note."
+      );
+    } finally {
+      setAddingNote(false);
+    }
+  }
+
+  async function handleAddComment() {
+    if (!user) {
+      router.push(
+        "/login"
+      );
+
+      return;
+    }
+
+    const trimmedComment =
+      newComment.trim();
+
+    if (!trimmedComment) {
+      setError(
+        "Please write a comment first."
+      );
+
+      return;
+    }
+
+    if (
+      trimmedComment.length >
+      1000
+    ) {
+      setError(
+        "Comments cannot exceed 1000 characters."
+      );
+
+      return;
+    }
+
+    try {
+      setAddingComment(true);
+      setError("");
+      setSuccess("");
+
+      const authorName =
+        profile?.name?.trim() ||
+        user.email?.split("@")[0] ||
+        "CivicPulse User";
+
+      await addDoc(
+        collection(
+          db,
+          "reports",
+          reportId,
+          "comments"
+        ),
+        {
+          text:
+            trimmedComment,
+
+          createdBy:
+            user.uid,
+
+          createdByName:
+            authorName,
+
+          role:
+            userRole,
+
+          createdAt:
+            serverTimestamp(),
+        }
+      );
+
+      setNewComment("");
+
+      setSuccess(
+        "Comment posted."
+      );
+
+      await loadPublicComments();
+    } catch (err) {
+      console.error(
+        "Add public comment error:",
+        err
+      );
+
+      setError(
+        "Failed to post your comment."
+      );
+    } finally {
+      setAddingComment(false);
     }
   }
 
@@ -763,6 +1286,7 @@ export default function ReportDetailsPage() {
           </h1>
 
           <button
+            type="button"
             onClick={() =>
               router.push(
                 "/dashboard"
@@ -782,8 +1306,7 @@ export default function ReportDetailsPage() {
   }
 
   /*
-   * TypeScript-safe non-null report reference.
-   * Everything below this point knows the report exists.
+   * From this point onward we know the report exists.
    */
   const currentReport: Report =
     report;
@@ -797,6 +1320,11 @@ export default function ReportDetailsPage() {
   const isOwner =
     !!user &&
     currentReport.createdBy ===
+      user.uid;
+
+  const isAssignedToMe =
+    !!user &&
+    currentReport.assignedTo ===
       user.uid;
 
   function renderStatusButton(
@@ -833,6 +1361,7 @@ export default function ReportDetailsPage() {
       <div className="mx-auto max-w-4xl">
         <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
           <button
+            type="button"
             onClick={() =>
               router.back()
             }
@@ -841,11 +1370,19 @@ export default function ReportDetailsPage() {
             ← Back
           </button>
 
-          {isStaff && (
-            <div className="rounded-full border border-blue-800 bg-blue-950/50 px-4 py-2 text-sm font-semibold text-blue-300">
-              Staff Mode
-            </div>
-          )}
+          <div className="flex flex-wrap items-center gap-3">
+            {isAssignedToMe && (
+              <span className="rounded-full border border-indigo-800 bg-indigo-950/50 px-4 py-2 text-sm font-semibold text-indigo-300">
+                Assigned to You
+              </span>
+            )}
+
+            {isStaff && (
+              <span className="rounded-full border border-blue-800 bg-blue-950/50 px-4 py-2 text-sm font-semibold text-blue-300">
+                Staff Mode
+              </span>
+            )}
+          </div>
         </div>
 
         <div className="overflow-hidden rounded-2xl border border-gray-800 bg-gray-900">
@@ -879,7 +1416,11 @@ export default function ReportDetailsPage() {
                 )}
               </span>
 
-              <span className="rounded-full bg-red-950 px-3 py-1 text-sm text-red-300">
+              <span
+                className={`rounded-full px-3 py-1 text-sm capitalize ${getSeverityBadgeClasses(
+                  currentReport.severity
+                )}`}
+              >
                 {
                   currentReport.severity
                 }
@@ -1051,10 +1592,6 @@ export default function ReportDetailsPage() {
                     <h2 className="mt-2 text-2xl font-bold">
                       Manage report status
                     </h2>
-
-                    <p className="mt-2 text-sm leading-6 text-gray-400">
-                      Every status change is added to the report timeline.
-                    </p>
                   </div>
 
                   <div className="rounded-xl bg-gray-900 px-4 py-3">
@@ -1109,27 +1646,244 @@ export default function ReportDetailsPage() {
                     🔄 Reopen Report
                   </button>
                 )}
-
-                {updatingStatus && (
-                  <p className="mt-4 text-sm text-blue-300">
-                    Updating report...
-                  </p>
-                )}
               </section>
             )}
 
-            <section className="mt-10">
-              <div className="mb-6">
-                <h2 className="text-2xl font-bold">
-                  Report Timeline
-                </h2>
+            {isStaff && (
+              <section className="mt-6 rounded-2xl border border-emerald-900 bg-emerald-950/10 p-6">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div>
+                    <p className="text-sm font-semibold uppercase tracking-wider text-emerald-400">
+                      Internal Case Notes
+                    </p>
 
-                <p className="mt-1 text-sm text-gray-400">
-                  Follow the progress of this issue from submission to resolution.
-                </p>
+                    <h2 className="mt-2 text-2xl font-bold">
+                      Staff activity notes
+                    </h2>
+
+                    <p className="mt-2 text-sm text-gray-400">
+                      These notes are private and are not shown to residents.
+                    </p>
+                  </div>
+
+                  <span className="rounded-full border border-emerald-900 bg-emerald-950/30 px-3 py-1 text-xs font-semibold text-emerald-300">
+                    Private
+                  </span>
+                </div>
+
+                <textarea
+                  value={
+                    newNote
+                  }
+                  onChange={(event) =>
+                    setNewNote(
+                      event.target.value
+                    )
+                  }
+                  maxLength={
+                    2000
+                  }
+                  rows={4}
+                  placeholder="Add an internal case note..."
+                  className="mt-6 w-full resize-none rounded-xl border border-gray-700 bg-gray-950 px-4 py-3 outline-none focus:border-emerald-600"
+                />
+
+                <div className="mt-3 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={
+                      handleAddCaseNote
+                    }
+                    disabled={
+                      addingNote ||
+                      !newNote.trim()
+                    }
+                    className="rounded-lg bg-emerald-600 px-5 py-3 font-semibold hover:bg-emerald-500 disabled:opacity-50"
+                  >
+                    {addingNote
+                      ? "Adding..."
+                      : "Add Case Note"}
+                  </button>
+                </div>
+
+                <div className="mt-8 space-y-3">
+                  {notesLoading ? (
+                    <p className="text-gray-400">
+                      Loading notes...
+                    </p>
+                  ) : caseNotes.length ===
+                    0 ? (
+                    <p className="text-sm text-gray-500">
+                      No internal notes yet.
+                    </p>
+                  ) : (
+                    caseNotes.map(
+                      (note) => (
+                        <article
+                          key={
+                            note.id
+                          }
+                          className="rounded-xl border border-gray-800 bg-gray-950 p-5"
+                        >
+                          <p className="font-semibold text-emerald-300">
+                            {
+                              note.createdByName
+                            }
+                          </p>
+
+                          <p className="mt-1 text-xs text-gray-500">
+                            {formatTimestamp(
+                              note.createdAt
+                            )}
+                          </p>
+
+                          <p className="mt-4 whitespace-pre-wrap text-gray-300">
+                            {
+                              note.text
+                            }
+                          </p>
+                        </article>
+                      )
+                    )
+                  )}
+                </div>
+              </section>
+            )}
+
+            <section className="mt-10 rounded-2xl border border-gray-800 bg-gray-950/40 p-6">
+              <p className="text-sm font-semibold uppercase tracking-wider text-purple-400">
+                Community Discussion
+              </p>
+
+              <h2 className="mt-2 text-2xl font-bold">
+                Public Comments
+              </h2>
+
+              <p className="mt-2 text-sm text-gray-400">
+                Residents and CivicPulse staff can discuss this report publicly.
+              </p>
+
+              {user && (
+                <div className="mt-6">
+                  <textarea
+                    value={
+                      newComment
+                    }
+                    onChange={(event) =>
+                      setNewComment(
+                        event.target.value
+                      )
+                    }
+                    maxLength={
+                      1000
+                    }
+                    rows={3}
+                    placeholder="Add a public comment..."
+                    className="w-full resize-none rounded-xl border border-gray-700 bg-gray-950 px-4 py-3 outline-none focus:border-purple-500"
+                  />
+
+                  <div className="mt-3 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={
+                        handleAddComment
+                      }
+                      disabled={
+                        addingComment ||
+                        !newComment.trim()
+                      }
+                      className="rounded-lg bg-purple-600 px-5 py-3 font-semibold hover:bg-purple-500 disabled:opacity-50"
+                    >
+                      {addingComment
+                        ? "Posting..."
+                        : "Post Comment"}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <div className="mt-8 space-y-4">
+                {commentsLoading ? (
+                  <p className="text-gray-400">
+                    Loading comments...
+                  </p>
+                ) : publicComments.length ===
+                  0 ? (
+                  <div className="rounded-xl border border-dashed border-gray-700 p-8 text-center">
+                    <div className="text-4xl">
+                      💬
+                    </div>
+
+                    <p className="mt-4 font-semibold">
+                      No comments yet
+                    </p>
+                  </div>
+                ) : (
+                  publicComments.map(
+                    (comment) => (
+                      <article
+                        key={
+                          comment.id
+                        }
+                        className="rounded-xl border border-gray-800 bg-gray-900 p-5"
+                      >
+                        <div className="flex flex-wrap items-center gap-3">
+                          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-800 font-bold">
+                            {comment.createdByName
+                              ?.charAt(0)
+                              .toUpperCase() ||
+                              "C"}
+                          </div>
+
+                          <div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="font-semibold">
+                                {
+                                  comment.createdByName
+                                }
+                              </p>
+
+                              <span
+                                className={`rounded-full border px-2 py-0.5 text-xs ${getRoleBadgeClasses(
+                                  comment.role
+                                )}`}
+                              >
+                                {getRoleLabel(
+                                  comment.role
+                                )}
+                              </span>
+                            </div>
+
+                            <p className="mt-1 text-xs text-gray-500">
+                              {formatTimestamp(
+                                comment.createdAt
+                              )}
+                            </p>
+                          </div>
+                        </div>
+
+                        <p className="mt-4 whitespace-pre-wrap text-gray-300">
+                          {
+                            comment.text
+                          }
+                        </p>
+                      </article>
+                    )
+                  )
+                )}
               </div>
+            </section>
 
-              <div>
+            <section className="mt-10">
+              <h2 className="text-2xl font-bold">
+                Report Timeline
+              </h2>
+
+              <p className="mt-1 text-sm text-gray-400">
+                Follow the progress of this issue from submission to resolution.
+              </p>
+
+              <div className="mt-6">
                 {sortedTimeline.map(
                   (
                     item,
@@ -1147,11 +1901,11 @@ export default function ReportDetailsPage() {
                       >
                         <div className="flex flex-col items-center">
                           <div
-                            className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full border ${
+                            className={`flex h-11 w-11 items-center justify-center rounded-full border ${
                               isLast
                                 ? "border-blue-500 bg-blue-950"
                                 : "border-gray-700 bg-gray-800"
-                            } text-lg`}
+                            }`}
                           >
                             {getStatusIcon(
                               item.status
@@ -1163,26 +1917,12 @@ export default function ReportDetailsPage() {
                           )}
                         </div>
 
-                        <div
-                          className={
-                            isLast
-                              ? "pb-2"
-                              : "pb-8"
-                          }
-                        >
-                          <div className="flex flex-wrap items-center gap-2">
-                            <p className="font-semibold">
-                              {getStatusLabel(
-                                item.status
-                              )}
-                            </p>
-
-                            {isLast && (
-                              <span className="rounded-full bg-blue-950 px-2 py-0.5 text-xs text-blue-300">
-                                Current
-                              </span>
+                        <div className="pb-8">
+                          <p className="font-semibold">
+                            {getStatusLabel(
+                              item.status
                             )}
-                          </div>
+                          </p>
 
                           <p className="mt-1 text-sm text-gray-400">
                             {formatTimestamp(
@@ -1220,6 +1960,7 @@ export default function ReportDetailsPage() {
                 </div>
               ) : (
                 <button
+                  type="button"
                   onClick={
                     handleConfirm
                   }
