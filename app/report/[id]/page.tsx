@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 
 import {
   arrayUnion,
+  collection,
   doc,
   getDoc,
+  getDocs,
   increment,
   serverTimestamp,
   Timestamp,
@@ -40,7 +42,12 @@ type Report = {
   confirmationCount?: number;
   confirmedBy?: string[];
 
+  assignedTo?: string | null;
+  assignedToName?: string | null;
+  assignedAt?: Timestamp | null;
+
   createdAt?: Timestamp;
+  updatedAt?: Timestamp;
 
   statusHistory?: StatusHistoryItem[];
 };
@@ -52,43 +59,26 @@ type UserProfile = {
   role?: string;
 };
 
-const STATUS_ORDER = [
-  "submitted",
-  "acknowledged",
-  "assigned",
-  "in-progress",
-  "resolved",
-];
-
 function getStatusLabel(status: string) {
   switch (status) {
     case "submitted":
       return "Submitted";
-
     case "verified":
       return "Verified";
-
     case "acknowledged":
       return "Acknowledged";
-
     case "assigned":
       return "Assigned";
-
     case "in-progress":
       return "In Progress";
-
     case "resolved":
       return "Resolved";
-
     case "rejected":
       return "Rejected";
-
     case "duplicate":
       return "Duplicate";
-
     case "reopened":
       return "Reopened";
-
     default:
       return status;
   }
@@ -98,31 +88,22 @@ function getStatusIcon(status: string) {
   switch (status) {
     case "submitted":
       return "📝";
-
     case "verified":
       return "✅";
-
     case "acknowledged":
       return "👀";
-
     case "assigned":
       return "👤";
-
     case "in-progress":
       return "🛠️";
-
     case "resolved":
       return "🎉";
-
     case "rejected":
       return "❌";
-
     case "duplicate":
       return "📎";
-
     case "reopened":
       return "🔄";
-
     default:
       return "●";
   }
@@ -132,32 +113,25 @@ function getStatusBadgeClasses(status: string) {
   switch (status) {
     case "submitted":
       return "bg-blue-950 text-blue-300";
-
     case "acknowledged":
       return "bg-purple-950 text-purple-300";
-
     case "assigned":
       return "bg-indigo-950 text-indigo-300";
-
     case "in-progress":
       return "bg-yellow-950 text-yellow-300";
-
     case "resolved":
       return "bg-green-950 text-green-300";
-
     case "reopened":
       return "bg-orange-950 text-orange-300";
-
     case "rejected":
       return "bg-red-950 text-red-300";
-
     default:
       return "bg-gray-800 text-gray-300";
   }
 }
 
 function formatTimestamp(
-  value?: Timestamp | Date
+  value?: Timestamp | Date | null
 ) {
   if (!value) {
     return "Time unavailable";
@@ -194,16 +168,28 @@ export default function ReportDetailsPage() {
   const [profile, setProfile] =
     useState<UserProfile | null>(null);
 
+  const [staffMembers, setStaffMembers] =
+    useState<UserProfile[]>([]);
+
+  const [selectedStaffId, setSelectedStaffId] =
+    useState("");
+
   const [loading, setLoading] =
     useState(true);
 
   const [profileLoading, setProfileLoading] =
     useState(true);
 
+  const [staffLoading, setStaffLoading] =
+    useState(false);
+
   const [confirming, setConfirming] =
     useState(false);
 
   const [updatingStatus, setUpdatingStatus] =
+    useState(false);
+
+  const [assigning, setAssigning] =
     useState(false);
 
   const [error, setError] =
@@ -220,27 +206,28 @@ export default function ReportDetailsPage() {
     try {
       setLoading(true);
 
-      const reportRef =
-        doc(
-          db,
-          "reports",
-          reportId
-        );
+      const reportRef = doc(
+        db,
+        "reports",
+        reportId
+      );
 
       const snapshot =
         await getDoc(reportRef);
 
       if (!snapshot.exists()) {
         setReport(null);
-        setError(
-          "Report not found."
-        );
-
+        setError("Report not found.");
         return;
       }
 
-      setReport(
-        snapshot.data() as Report
+      const data =
+        snapshot.data() as Report;
+
+      setReport(data);
+
+      setSelectedStaffId(
+        data.assignedTo ?? ""
       );
     } catch (err) {
       console.error(
@@ -266,12 +253,11 @@ export default function ReportDetailsPage() {
     try {
       setProfileLoading(true);
 
-      const userRef =
-        doc(
-          db,
-          "users",
-          user.uid
-        );
+      const userRef = doc(
+        db,
+        "users",
+        user.uid
+      );
 
       const snapshot =
         await getDoc(userRef);
@@ -305,6 +291,67 @@ export default function ReportDetailsPage() {
     }
   }
 
+  async function loadStaffMembers() {
+    try {
+      setStaffLoading(true);
+
+      const snapshot =
+        await getDocs(
+          collection(
+            db,
+            "users"
+          )
+        );
+
+      const members =
+        snapshot.docs
+          .map(
+            (item) =>
+              item.data() as UserProfile
+          )
+          .filter((member) => {
+            const role =
+              member.role
+                ?.toLowerCase()
+                .trim();
+
+            return (
+              role === "staff" ||
+              role === "admin"
+            );
+          });
+
+      members.sort((a, b) => {
+        const aName =
+          a.name ||
+          a.email ||
+          "";
+
+        const bName =
+          b.name ||
+          b.email ||
+          "";
+
+        return aName.localeCompare(
+          bName
+        );
+      });
+
+      setStaffMembers(members);
+    } catch (err) {
+      console.error(
+        "Load staff error:",
+        err
+      );
+
+      setError(
+        "Unable to load staff members."
+      );
+    } finally {
+      setStaffLoading(false);
+    }
+  }
+
   useEffect(() => {
     if (reportId) {
       loadReport();
@@ -315,7 +362,25 @@ export default function ReportDetailsPage() {
     if (!authLoading) {
       loadUserProfile();
     }
-  }, [user, authLoading]);
+  }, [
+    user,
+    authLoading,
+  ]);
+
+  const userRole =
+    profile?.role
+      ?.toLowerCase()
+      .trim();
+
+  const isStaff =
+    userRole === "staff" ||
+    userRole === "admin";
+
+  useEffect(() => {
+    if (isStaff) {
+      loadStaffMembers();
+    }
+  }, [isStaff]);
 
   async function handleConfirm() {
     if (!user) {
@@ -328,8 +393,7 @@ export default function ReportDetailsPage() {
     }
 
     if (
-      report.createdBy ===
-      user.uid
+      report.createdBy === user.uid
     ) {
       setError(
         "You cannot confirm your own report."
@@ -355,12 +419,11 @@ export default function ReportDetailsPage() {
       setError("");
       setSuccess("");
 
-      const reportRef =
-        doc(
-          db,
-          "reports",
-          reportId
-        );
+      const reportRef = doc(
+        db,
+        "reports",
+        reportId
+      );
 
       await updateDoc(
         reportRef,
@@ -404,22 +467,13 @@ export default function ReportDetailsPage() {
       setError(
         "You must be logged in."
       );
-
       return;
     }
-
-    const role =
-      profile?.role?.toLowerCase();
-
-    const isStaff =
-      role === "staff" ||
-      role === "admin";
 
     if (!isStaff) {
       setError(
         "You do not have permission to update report statuses."
       );
-
       return;
     }
 
@@ -445,20 +499,11 @@ export default function ReportDetailsPage() {
       setError("");
       setSuccess("");
 
-      const reportRef =
-        doc(
-          db,
-          "reports",
-          reportId
-        );
-
-      const historyItem = {
-        status: newStatus,
-        changedAt:
-          Timestamp.now(),
-        changedBy:
-          user.uid,
-      };
+      const reportRef = doc(
+        db,
+        "reports",
+        reportId
+      );
 
       await updateDoc(
         reportRef,
@@ -467,9 +512,16 @@ export default function ReportDetailsPage() {
             newStatus,
 
           statusHistory:
-            arrayUnion(
-              historyItem
-            ),
+            arrayUnion({
+              status:
+                newStatus,
+
+              changedAt:
+                Timestamp.now(),
+
+              changedBy:
+                user.uid,
+            }),
 
           updatedAt:
             serverTimestamp(),
@@ -497,13 +549,203 @@ export default function ReportDetailsPage() {
     }
   }
 
+  async function handleAssign() {
+    if (!user) {
+      setError(
+        "You must be logged in."
+      );
+      return;
+    }
+
+    if (!isStaff) {
+      setError(
+        "You do not have permission to assign reports."
+      );
+      return;
+    }
+
+    if (!selectedStaffId) {
+      setError(
+        "Please choose a staff member."
+      );
+      return;
+    }
+
+    const selectedMember =
+      staffMembers.find(
+        (member) =>
+          member.uid ===
+          selectedStaffId
+      );
+
+    if (!selectedMember) {
+      setError(
+        "Selected staff member could not be found."
+      );
+      return;
+    }
+
+    try {
+      setAssigning(true);
+      setError("");
+      setSuccess("");
+
+      const reportRef = doc(
+        db,
+        "reports",
+        reportId
+      );
+
+      const assigneeName =
+        selectedMember.name?.trim() ||
+        selectedMember.email ||
+        "Staff Member";
+
+      const updateData: Record<
+        string,
+        unknown
+      > = {
+        assignedTo:
+          selectedStaffId,
+
+        assignedToName:
+          assigneeName,
+
+        assignedAt:
+          serverTimestamp(),
+
+        updatedAt:
+          serverTimestamp(),
+      };
+
+      if (
+        report?.status !==
+        "assigned"
+      ) {
+        updateData.status =
+          "assigned";
+
+        updateData.statusHistory =
+          arrayUnion({
+            status:
+              "assigned",
+
+            changedAt:
+              Timestamp.now(),
+
+            changedBy:
+              user.uid,
+          });
+      }
+
+      await updateDoc(
+        reportRef,
+        updateData
+      );
+
+      setSuccess(
+        `Report assigned to ${assigneeName}.`
+      );
+
+      await loadReport();
+    } catch (err) {
+      console.error(
+        "Assign report error:",
+        err
+      );
+
+      setError(
+        "Failed to assign this report."
+      );
+    } finally {
+      setAssigning(false);
+    }
+  }
+
+  async function handleUnassign() {
+    if (!user) {
+      return;
+    }
+
+    if (!isStaff) {
+      setError(
+        "You do not have permission to unassign reports."
+      );
+      return;
+    }
+
+    try {
+      setAssigning(true);
+      setError("");
+      setSuccess("");
+
+      const reportRef = doc(
+        db,
+        "reports",
+        reportId
+      );
+
+      await updateDoc(
+        reportRef,
+        {
+          assignedTo: null,
+          assignedToName: null,
+          assignedAt: null,
+          updatedAt:
+            serverTimestamp(),
+        }
+      );
+
+      setSelectedStaffId("");
+
+      setSuccess(
+        "Report assignment removed."
+      );
+
+      await loadReport();
+    } catch (err) {
+      console.error(
+        "Unassign report error:",
+        err
+      );
+
+      setError(
+        "Failed to remove assignment."
+      );
+    } finally {
+      setAssigning(false);
+    }
+  }
+
+  const sortedTimeline =
+    useMemo(() => {
+      if (
+        report?.statusHistory &&
+        report.statusHistory.length >
+          0
+      ) {
+        return report.statusHistory;
+      }
+
+      return [
+        {
+          status:
+            report?.status ||
+            "submitted",
+
+          changedAt:
+            report?.createdAt,
+        },
+      ];
+    }, [report]);
+
   if (
     loading ||
     authLoading ||
     profileLoading
   ) {
     return (
-      <main className="min-h-screen flex items-center justify-center bg-gray-950 text-white">
+      <main className="flex min-h-screen items-center justify-center bg-gray-950 text-white">
         Loading report...
       </main>
     );
@@ -514,7 +756,7 @@ export default function ReportDetailsPage() {
     !report
   ) {
     return (
-      <main className="min-h-screen flex items-center justify-center bg-gray-950 text-white p-6">
+      <main className="flex min-h-screen items-center justify-center bg-gray-950 p-6 text-white">
         <div className="text-center">
           <h1 className="text-2xl font-bold">
             {error}
@@ -539,45 +781,31 @@ export default function ReportDetailsPage() {
     return null;
   }
 
+  /*
+   * TypeScript-safe non-null report reference.
+   * Everything below this point knows the report exists.
+   */
+  const currentReport: Report =
+    report;
+
   const alreadyConfirmed =
     !!user &&
-    report.confirmedBy?.includes(
+    currentReport.confirmedBy?.includes(
       user.uid
     );
 
   const isOwner =
     !!user &&
-    report.createdBy ===
+    currentReport.createdBy ===
       user.uid;
-
-  const userRole =
-    profile?.role?.toLowerCase();
-
-  const isStaff =
-    userRole === "staff" ||
-    userRole === "admin";
-
-  const timeline =
-    report.statusHistory &&
-    report.statusHistory.length > 0
-      ? report.statusHistory
-      : [
-          {
-            status:
-              report.status ||
-              "submitted",
-
-            changedAt:
-              report.createdAt,
-          },
-        ];
 
   function renderStatusButton(
     status: string,
     label: string
   ) {
     const isCurrent =
-      report?.status === status;
+      currentReport.status ===
+      status;
 
     return (
       <button
@@ -621,13 +849,13 @@ export default function ReportDetailsPage() {
         </div>
 
         <div className="overflow-hidden rounded-2xl border border-gray-800 bg-gray-900">
-          {report.imageUrl && (
+          {currentReport.imageUrl && (
             <img
               src={
-                report.imageUrl
+                currentReport.imageUrl
               }
               alt={
-                report.title
+                currentReport.title
               }
               className="h-80 w-full object-cover"
             />
@@ -637,36 +865,36 @@ export default function ReportDetailsPage() {
             <div className="flex flex-wrap items-center gap-3">
               <span className="rounded-full bg-blue-950 px-3 py-1 text-sm text-blue-300">
                 {
-                  report.category
+                  currentReport.category
                 }
               </span>
 
               <span
                 className={`rounded-full px-3 py-1 text-sm ${getStatusBadgeClasses(
-                  report.status
+                  currentReport.status
                 )}`}
               >
                 {getStatusLabel(
-                  report.status
+                  currentReport.status
                 )}
               </span>
 
               <span className="rounded-full bg-red-950 px-3 py-1 text-sm text-red-300">
                 {
-                  report.severity
+                  currentReport.severity
                 }
               </span>
             </div>
 
             <h1 className="mt-5 text-4xl font-bold">
               {
-                report.title
+                currentReport.title
               }
             </h1>
 
             <p className="mt-4 text-lg leading-8 text-gray-300">
               {
-                report.description
+                currentReport.description
               }
             </p>
 
@@ -677,17 +905,13 @@ export default function ReportDetailsPage() {
                 </p>
 
                 <p className="mt-2 font-medium">
-                  {
-                    report.latitude.toFixed(
-                      6
-                    )
-                  }
+                  {currentReport.latitude.toFixed(
+                    6
+                  )}
                   ,{" "}
-                  {
-                    report.longitude.toFixed(
-                      6
-                    )
-                  }
+                  {currentReport.longitude.toFixed(
+                    6
+                  )}
                 </p>
               </div>
 
@@ -697,34 +921,131 @@ export default function ReportDetailsPage() {
                 </p>
 
                 <p className="mt-2 text-2xl font-bold">
-                  {
-                    report.confirmationCount ??
-                    0
-                  }
+                  {currentReport.confirmationCount ??
+                    0}
                 </p>
               </div>
             </div>
 
-            {report.createdByEmail && (
-              <div className="mt-6 rounded-xl border border-gray-800 p-5">
-                <p className="text-sm text-gray-400">
-                  Reported by
+            {currentReport.assignedTo && (
+              <div className="mt-6 rounded-xl border border-indigo-900 bg-indigo-950/20 p-5">
+                <p className="text-sm font-semibold uppercase tracking-wider text-indigo-400">
+                  Assigned Case Worker
                 </p>
 
-                <p className="mt-1">
-                  {
-                    report.createdByEmail
-                  }
+                <p className="mt-2 text-lg font-bold">
+                  {currentReport.assignedToName ||
+                    "Staff Member"}
+                </p>
+
+                <p className="mt-1 text-sm text-gray-400">
+                  Assigned{" "}
+                  {formatTimestamp(
+                    currentReport.assignedAt
+                  )}
                 </p>
               </div>
             )}
 
             {isStaff && (
-              <section className="mt-10 rounded-2xl border border-blue-900 bg-blue-950/20 p-6">
+              <section className="mt-10 rounded-2xl border border-indigo-900 bg-indigo-950/20 p-6">
+                <p className="text-sm font-semibold uppercase tracking-wider text-indigo-400">
+                  Case Assignment
+                </p>
+
+                <h2 className="mt-2 text-2xl font-bold">
+                  Assign this report
+                </h2>
+
+                <p className="mt-2 text-sm leading-6 text-gray-400">
+                  Choose the staff member responsible for handling this case.
+                </p>
+
+                <div className="mt-5 flex flex-col gap-3 sm:flex-row">
+                  <select
+                    value={
+                      selectedStaffId
+                    }
+                    onChange={(event) =>
+                      setSelectedStaffId(
+                        event.target.value
+                      )
+                    }
+                    disabled={
+                      staffLoading ||
+                      assigning
+                    }
+                    className="min-w-0 flex-1 rounded-lg border border-gray-700 bg-gray-950 px-4 py-3 outline-none focus:border-indigo-500 disabled:opacity-50"
+                  >
+                    <option value="">
+                      {staffLoading
+                        ? "Loading staff..."
+                        : "Choose staff member"}
+                    </option>
+
+                    {staffMembers.map(
+                      (member) => (
+                        <option
+                          key={
+                            member.uid
+                          }
+                          value={
+                            member.uid
+                          }
+                        >
+                          {member.name ||
+                            member.email ||
+                            "Staff Member"}
+                          {" — "}
+                          {member.role}
+                        </option>
+                      )
+                    )}
+                  </select>
+
+                  <button
+                    type="button"
+                    onClick={
+                      handleAssign
+                    }
+                    disabled={
+                      assigning ||
+                      staffLoading ||
+                      !selectedStaffId
+                    }
+                    className="rounded-lg bg-indigo-600 px-5 py-3 font-semibold hover:bg-indigo-500 disabled:opacity-50"
+                  >
+                    {assigning
+                      ? "Saving..."
+                      : currentReport.assignedTo
+                      ? "Reassign"
+                      : "Assign"}
+                  </button>
+                </div>
+
+                {currentReport.assignedTo && (
+                  <button
+                    type="button"
+                    onClick={
+                      handleUnassign
+                    }
+                    disabled={
+                      assigning
+                    }
+                    className="mt-3 text-sm font-semibold text-red-400 hover:text-red-300 disabled:opacity-50"
+                  >
+                    Remove Assignment
+                  </button>
+                )}
+              </section>
+            )}
+
+            {isStaff && (
+              <section className="mt-6 rounded-2xl border border-blue-900 bg-blue-950/20 p-6">
                 <div className="flex flex-wrap items-start justify-between gap-4">
                   <div>
                     <p className="text-sm font-semibold uppercase tracking-wider text-blue-400">
-                      Staff controls
+                      Staff Controls
                     </p>
 
                     <h2 className="mt-2 text-2xl font-bold">
@@ -732,7 +1053,7 @@ export default function ReportDetailsPage() {
                     </h2>
 
                     <p className="mt-2 text-sm leading-6 text-gray-400">
-                      Every status change is recorded in the report timeline.
+                      Every status change is added to the report timeline.
                     </p>
                   </div>
 
@@ -743,7 +1064,7 @@ export default function ReportDetailsPage() {
 
                     <p className="mt-1 font-semibold">
                       {getStatusLabel(
-                        report.status
+                        currentReport.status
                       )}
                     </p>
                   </div>
@@ -757,7 +1078,7 @@ export default function ReportDetailsPage() {
 
                   {renderStatusButton(
                     "assigned",
-                    "👤 Assign"
+                    "👤 Assigned"
                   )}
 
                   {renderStatusButton(
@@ -771,7 +1092,7 @@ export default function ReportDetailsPage() {
                   )}
                 </div>
 
-                {report.status ===
+                {currentReport.status ===
                   "resolved" && (
                   <button
                     type="button"
@@ -809,14 +1130,14 @@ export default function ReportDetailsPage() {
               </div>
 
               <div>
-                {timeline.map(
+                {sortedTimeline.map(
                   (
                     item,
                     index
                   ) => {
                     const isLast =
                       index ===
-                      timeline.length -
+                      sortedTimeline.length -
                         1;
 
                     return (
