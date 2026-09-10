@@ -1,13 +1,35 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import {
+  useEffect,
+  useState,
+} from "react";
 
-import { signOut } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
+import {
+  useRouter,
+} from "next/navigation";
 
-import { auth, db } from "@/src/lib/firebase";
-import { useAuth } from "@/src/lib/AuthContext";
+import {
+  signOut,
+} from "firebase/auth";
+
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  query,
+  where,
+} from "firebase/firestore";
+
+import {
+  auth,
+  db,
+} from "@/src/lib/firebase";
+
+import {
+  useAuth,
+} from "@/src/lib/AuthContext";
 
 type UserProfile = {
   uid?: string;
@@ -18,26 +40,51 @@ type UserProfile = {
 };
 
 export default function DashboardPage() {
-  const router = useRouter();
+  const router =
+    useRouter();
 
   const {
     user,
     loading: authLoading,
   } = useAuth();
 
-  const [profile, setProfile] =
-    useState<UserProfile | null>(null);
+  const [
+    profile,
+    setProfile,
+  ] =
+    useState<UserProfile | null>(
+      null
+    );
 
-  const [profileLoading, setProfileLoading] =
+  const [
+    profileLoading,
+    setProfileLoading,
+  ] =
     useState(true);
 
-  const [error, setError] =
+  const [
+    unreadCount,
+    setUnreadCount,
+  ] =
+    useState(0);
+
+  const [
+    notificationLoading,
+    setNotificationLoading,
+  ] =
+    useState(true);
+
+  const [
+    error,
+    setError,
+  ] =
     useState("");
 
   async function loadProfile() {
     if (!user) {
       setProfile(null);
       setProfileLoading(false);
+
       return;
     }
 
@@ -45,21 +92,33 @@ export default function DashboardPage() {
       setProfileLoading(true);
       setError("");
 
-      const userRef = doc(
-        db,
-        "users",
-        user.uid
-      );
+      const userRef =
+        doc(
+          db,
+          "users",
+          user.uid
+        );
 
       const snapshot =
-        await getDoc(userRef);
+        await getDoc(
+          userRef
+        );
 
-      if (!snapshot.exists()) {
+      if (
+        !snapshot.exists()
+      ) {
         setProfile({
-          uid: user.uid,
-          email: user.email ?? "",
-          role: "resident",
-          trustScore: 50,
+          uid:
+            user.uid,
+
+          email:
+            user.email ?? "",
+
+          role:
+            "resident",
+
+          trustScore:
+            50,
         });
 
         return;
@@ -75,9 +134,14 @@ export default function DashboardPage() {
       );
 
       setProfile({
-        uid: user.uid,
-        email: user.email ?? "",
-        role: "resident",
+        uid:
+          user.uid,
+
+        email:
+          user.email ?? "",
+
+        role:
+          "resident",
       });
 
       setError(
@@ -88,8 +152,59 @@ export default function DashboardPage() {
     }
   }
 
+  async function loadUnreadNotifications() {
+    if (!user) {
+      setUnreadCount(0);
+      setNotificationLoading(false);
+
+      return;
+    }
+
+    try {
+      setNotificationLoading(true);
+
+      const unreadQuery =
+        query(
+          collection(
+            db,
+            "notifications"
+          ),
+          where(
+            "userId",
+            "==",
+            user.uid
+          ),
+          where(
+            "read",
+            "==",
+            false
+          )
+        );
+
+      const snapshot =
+        await getDocs(
+          unreadQuery
+        );
+
+      setUnreadCount(
+        snapshot.size
+      );
+    } catch (err) {
+      console.error(
+        "Notification count error:",
+        err
+      );
+
+      setUnreadCount(0);
+    } finally {
+      setNotificationLoading(false);
+    }
+  }
+
   useEffect(() => {
-    if (authLoading) {
+    if (
+      authLoading
+    ) {
       return;
     }
 
@@ -102,6 +217,7 @@ export default function DashboardPage() {
     }
 
     loadProfile();
+    loadUnreadNotifications();
   }, [
     user,
     authLoading,
@@ -109,7 +225,9 @@ export default function DashboardPage() {
 
   async function handleLogout() {
     try {
-      await signOut(auth);
+      await signOut(
+        auth
+      );
 
       router.push(
         "/login"
@@ -188,13 +306,39 @@ export default function DashboardPage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() =>
+                router.push(
+                  "/notifications"
+                )
+              }
+              className="relative flex h-12 w-12 items-center justify-center rounded-xl border border-gray-700 bg-gray-900 text-xl transition hover:border-blue-600 hover:bg-gray-800"
+              aria-label="Notifications"
+            >
+              🔔
+
+              {!notificationLoading &&
+                unreadCount >
+                  0 && (
+                  <span className="absolute -right-2 -top-2 flex min-h-6 min-w-6 items-center justify-center rounded-full bg-red-600 px-1.5 text-xs font-bold text-white">
+                    {unreadCount >
+                    99
+                      ? "99+"
+                      : unreadCount}
+                  </span>
+                )}
+            </button>
+
             <div className="rounded-xl border border-gray-800 bg-gray-900 px-4 py-2">
               <p className="text-xs text-gray-500">
                 Signed in as
               </p>
 
               <p className="max-w-52 truncate text-sm font-semibold text-gray-200">
-                {displayName}
+                {
+                  displayName
+                }
               </p>
             </div>
 
@@ -212,7 +356,9 @@ export default function DashboardPage() {
 
         {error && (
           <div className="mt-6 rounded-xl border border-yellow-900 bg-yellow-950/30 p-4 text-yellow-300">
-            {error}
+            {
+              error
+            }
           </div>
         )}
 
@@ -222,7 +368,10 @@ export default function DashboardPage() {
           </p>
 
           <h2 className="mt-3 text-3xl font-bold sm:text-4xl">
-            Welcome, {displayName}
+            Welcome,{" "}
+            {
+              displayName
+            }
           </h2>
 
           <p className="mt-3 max-w-2xl text-lg leading-8 text-gray-400">

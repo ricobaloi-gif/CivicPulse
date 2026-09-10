@@ -27,7 +27,12 @@ import {
 } from "firebase/firestore";
 
 import { db } from "@/src/lib/firebase";
+
 import { useAuth } from "@/src/lib/AuthContext";
+
+import {
+  createNotification,
+} from "@/src/lib/notifications";
 
 type StatusHistoryItem = {
   status: string;
@@ -87,7 +92,9 @@ type PublicComment = {
   createdAt?: Timestamp | null;
 };
 
-function getStatusLabel(status: string) {
+function getStatusLabel(
+  status: string
+) {
   switch (status) {
     case "submitted":
       return "Submitted";
@@ -121,7 +128,9 @@ function getStatusLabel(status: string) {
   }
 }
 
-function getStatusIcon(status: string) {
+function getStatusIcon(
+  status: string
+) {
   switch (status) {
     case "submitted":
       return "📝";
@@ -155,7 +164,9 @@ function getStatusIcon(status: string) {
   }
 }
 
-function getStatusBadgeClasses(status: string) {
+function getStatusBadgeClasses(
+  status: string
+) {
   switch (status) {
     case "submitted":
       return "bg-blue-950 text-blue-300";
@@ -183,7 +194,9 @@ function getStatusBadgeClasses(status: string) {
   }
 }
 
-function getSeverityBadgeClasses(severity: string) {
+function getSeverityBadgeClasses(
+  severity: string
+) {
   switch (severity) {
     case "critical":
       return "bg-red-950 text-red-300";
@@ -202,7 +215,9 @@ function getSeverityBadgeClasses(severity: string) {
   }
 }
 
-function getRoleBadgeClasses(role: string) {
+function getRoleBadgeClasses(
+  role: string
+) {
   switch (
     role
       .toLowerCase()
@@ -219,7 +234,9 @@ function getRoleBadgeClasses(role: string) {
   }
 }
 
-function getRoleLabel(role: string) {
+function getRoleLabel(
+  role: string
+) {
   switch (
     role
       .toLowerCase()
@@ -243,7 +260,9 @@ function formatTimestamp(
     return "Time unavailable";
   }
 
-  if (value instanceof Date) {
+  if (
+    value instanceof Date
+  ) {
     return value.toLocaleString();
   }
 
@@ -260,8 +279,11 @@ function formatTimestamp(
 }
 
 export default function ReportDetailsPage() {
-  const params = useParams();
-  const router = useRouter();
+  const params =
+    useParams();
+
+  const router =
+    useRouter();
 
   const {
     user,
@@ -274,9 +296,10 @@ export default function ReportDetailsPage() {
   const [
     report,
     setReport,
-  ] = useState<Report | null>(
-    null
-  );
+  ] =
+    useState<Report | null>(
+      null
+    );
 
   const [
     profile,
@@ -290,94 +313,115 @@ export default function ReportDetailsPage() {
     staffMembers,
     setStaffMembers,
   ] =
-    useState<UserProfile[]>([]);
+    useState<UserProfile[]>(
+      []
+    );
 
   const [
     selectedStaffId,
     setSelectedStaffId,
-  ] = useState("");
+  ] =
+    useState("");
 
   const [
     caseNotes,
     setCaseNotes,
   ] =
-    useState<CaseNote[]>([]);
+    useState<CaseNote[]>(
+      []
+    );
 
   const [
     publicComments,
     setPublicComments,
   ] =
-    useState<PublicComment[]>([]);
+    useState<PublicComment[]>(
+      []
+    );
 
   const [
     newNote,
     setNewNote,
-  ] = useState("");
+  ] =
+    useState("");
 
   const [
     newComment,
     setNewComment,
-  ] = useState("");
+  ] =
+    useState("");
 
   const [
     loading,
     setLoading,
-  ] = useState(true);
+  ] =
+    useState(true);
 
   const [
     profileLoading,
     setProfileLoading,
-  ] = useState(true);
+  ] =
+    useState(true);
 
   const [
     staffLoading,
     setStaffLoading,
-  ] = useState(false);
+  ] =
+    useState(false);
 
   const [
     notesLoading,
     setNotesLoading,
-  ] = useState(false);
+  ] =
+    useState(false);
 
   const [
     commentsLoading,
     setCommentsLoading,
-  ] = useState(false);
+  ] =
+    useState(false);
 
   const [
     confirming,
     setConfirming,
-  ] = useState(false);
+  ] =
+    useState(false);
 
   const [
     updatingStatus,
     setUpdatingStatus,
-  ] = useState(false);
+  ] =
+    useState(false);
 
   const [
     assigning,
     setAssigning,
-  ] = useState(false);
+  ] =
+    useState(false);
 
   const [
     addingNote,
     setAddingNote,
-  ] = useState(false);
+  ] =
+    useState(false);
 
   const [
     addingComment,
     setAddingComment,
-  ] = useState(false);
+  ] =
+    useState(false);
 
   const [
     error,
     setError,
-  ] = useState("");
+  ] =
+    useState("");
 
   const [
     success,
     setSuccess,
-  ] = useState("");
+  ] =
+    useState("");
 
   async function loadReport() {
     if (!reportId) {
@@ -395,9 +439,13 @@ export default function ReportDetailsPage() {
         );
 
       const snapshot =
-        await getDoc(reportRef);
+        await getDoc(
+          reportRef
+        );
 
-      if (!snapshot.exists()) {
+      if (
+        !snapshot.exists()
+      ) {
         setReport(null);
 
         setError(
@@ -410,7 +458,9 @@ export default function ReportDetailsPage() {
       const data =
         snapshot.data() as Report;
 
-      setReport(data);
+      setReport(
+        data
+      );
 
       setSelectedStaffId(
         data.assignedTo ?? ""
@@ -433,6 +483,7 @@ export default function ReportDetailsPage() {
     if (!user) {
       setProfile(null);
       setProfileLoading(false);
+
       return;
     }
 
@@ -447,14 +498,22 @@ export default function ReportDetailsPage() {
         );
 
       const snapshot =
-        await getDoc(userRef);
+        await getDoc(
+          userRef
+        );
 
-      if (!snapshot.exists()) {
+      if (
+        !snapshot.exists()
+      ) {
         setProfile({
-          uid: user.uid,
+          uid:
+            user.uid,
+
           email:
             user.email ?? "",
-          role: "resident",
+
+          role:
+            "resident",
         });
 
         return;
@@ -470,10 +529,14 @@ export default function ReportDetailsPage() {
       );
 
       setProfile({
-        uid: user.uid,
+        uid:
+          user.uid,
+
         email:
           user.email ?? "",
-        role: "resident",
+
+        role:
+          "resident",
       });
     } finally {
       setProfileLoading(false);
@@ -513,7 +576,10 @@ export default function ReportDetailsPage() {
           );
 
       members.sort(
-        (a, b) => {
+        (
+          a,
+          b
+        ) => {
           const aName =
             a.name ||
             a.email ||
@@ -576,8 +642,12 @@ export default function ReportDetailsPage() {
 
       const notes =
         snapshot.docs.map(
-          (noteDoc) => ({
-            id: noteDoc.id,
+          (
+            noteDoc
+          ) => ({
+            id:
+              noteDoc.id,
+
             ...noteDoc.data(),
           })
         ) as CaseNote[];
@@ -628,9 +698,12 @@ export default function ReportDetailsPage() {
 
       const comments =
         snapshot.docs.map(
-          (commentDoc) => ({
+          (
+            commentDoc
+          ) => ({
             id:
               commentDoc.id,
+
             ...commentDoc.data(),
           })
         ) as PublicComment[];
@@ -653,14 +726,21 @@ export default function ReportDetailsPage() {
   }
 
   useEffect(() => {
-    if (reportId) {
+    if (
+      reportId
+    ) {
       loadReport();
+
       loadPublicComments();
     }
-  }, [reportId]);
+  }, [
+    reportId,
+  ]);
 
   useEffect(() => {
-    if (!authLoading) {
+    if (
+      !authLoading
+    ) {
       loadUserProfile();
     }
   }, [
@@ -682,8 +762,11 @@ export default function ReportDetailsPage() {
     userRole === "admin";
 
   useEffect(() => {
-    if (isStaff) {
+    if (
+      isStaff
+    ) {
       loadStaffMembers();
+
       loadCaseNotes();
     }
   }, [
@@ -754,6 +837,33 @@ export default function ReportDetailsPage() {
             serverTimestamp(),
         }
       );
+
+      /*
+       * Notify the report creator.
+       */
+      if (
+        report.createdBy !==
+        user.uid
+      ) {
+        await createNotification({
+          userId:
+            report.createdBy,
+
+          createdBy:
+            user.uid,
+
+          type:
+            "confirmation",
+
+          title:
+            "Report Confirmed",
+
+          message:
+            `Someone confirmed your report "${report.title}".`,
+
+          reportId,
+        });
+      }
 
       setSuccess(
         "You confirmed this issue."
@@ -845,6 +955,35 @@ export default function ReportDetailsPage() {
         }
       );
 
+      /*
+       * Notify the person who submitted the report.
+       */
+      if (
+        report.createdBy !==
+        user.uid
+      ) {
+        await createNotification({
+          userId:
+            report.createdBy,
+
+          createdBy:
+            user.uid,
+
+          type:
+            "status",
+
+          title:
+            "Report Status Updated",
+
+          message:
+            `Your report "${report.title}" is now ${getStatusLabel(
+              newStatus
+            )}.`,
+
+          reportId,
+        });
+      }
+
       setSuccess(
         `Report updated to ${getStatusLabel(
           newStatus
@@ -883,11 +1022,6 @@ export default function ReportDetailsPage() {
       return;
     }
 
-    /*
-     * FIX:
-     * TypeScript must know the report exists
-     * before report.status is accessed.
-     */
     if (!report) {
       setError(
         "Report data is not available."
@@ -896,7 +1030,9 @@ export default function ReportDetailsPage() {
       return;
     }
 
-    if (!selectedStaffId) {
+    if (
+      !selectedStaffId
+    ) {
       setError(
         "Please choose a staff member."
       );
@@ -906,12 +1042,16 @@ export default function ReportDetailsPage() {
 
     const selectedMember =
       staffMembers.find(
-        (member) =>
+        (
+          member
+        ) =>
           member.uid ===
           selectedStaffId
       );
 
-    if (!selectedMember) {
+    if (
+      !selectedMember
+    ) {
       setError(
         "Selected staff member could not be found."
       );
@@ -978,6 +1118,60 @@ export default function ReportDetailsPage() {
         updateData
       );
 
+      /*
+       * Notify the staff member.
+       */
+      if (
+        selectedStaffId !==
+        user.uid
+      ) {
+        await createNotification({
+          userId:
+            selectedStaffId,
+
+          createdBy:
+            user.uid,
+
+          type:
+            "assignment",
+
+          title:
+            "New Case Assigned",
+
+          message:
+            `You have been assigned the report "${report.title}".`,
+
+          reportId,
+        });
+      }
+
+      /*
+       * Notify the resident who created the report.
+       */
+      if (
+        report.createdBy !==
+        user.uid
+      ) {
+        await createNotification({
+          userId:
+            report.createdBy,
+
+          createdBy:
+            user.uid,
+
+          type:
+            "assignment",
+
+          title:
+            "Report Assigned",
+
+          message:
+            `Your report "${report.title}" has been assigned to ${assigneeName}.`,
+
+          reportId,
+        });
+      }
+
       setSuccess(
         `Report assigned to ${assigneeName}.`
       );
@@ -1039,7 +1233,9 @@ export default function ReportDetailsPage() {
         }
       );
 
-      setSelectedStaffId("");
+      setSelectedStaffId(
+        ""
+      );
 
       setSuccess(
         "Report assignment removed."
@@ -1080,7 +1276,9 @@ export default function ReportDetailsPage() {
     const trimmedNote =
       newNote.trim();
 
-    if (!trimmedNote) {
+    if (
+      !trimmedNote
+    ) {
       setError(
         "Please write a case note first."
       );
@@ -1162,10 +1360,16 @@ export default function ReportDetailsPage() {
       return;
     }
 
+    if (!report) {
+      return;
+    }
+
     const trimmedComment =
       newComment.trim();
 
-    if (!trimmedComment) {
+    if (
+      !trimmedComment
+    ) {
       setError(
         "Please write a comment first."
       );
@@ -1219,6 +1423,34 @@ export default function ReportDetailsPage() {
         }
       );
 
+      /*
+       * If someone other than the reporter comments,
+       * notify the person who submitted the report.
+       */
+      if (
+        report.createdBy !==
+        user.uid
+      ) {
+        await createNotification({
+          userId:
+            report.createdBy,
+
+          createdBy:
+            user.uid,
+
+          type:
+            "comment",
+
+          title:
+            "New Comment",
+
+          message:
+            `${authorName} commented on your report "${report.title}".`,
+
+          reportId,
+        });
+      }
+
       setNewComment("");
 
       setSuccess(
@@ -1241,26 +1473,31 @@ export default function ReportDetailsPage() {
   }
 
   const sortedTimeline =
-    useMemo(() => {
-      if (
-        report?.statusHistory &&
-        report.statusHistory.length >
-          0
-      ) {
-        return report.statusHistory;
-      }
+    useMemo(
+      () => {
+        if (
+          report?.statusHistory &&
+          report.statusHistory.length >
+            0
+        ) {
+          return report.statusHistory;
+        }
 
-      return [
-        {
-          status:
-            report?.status ||
-            "submitted",
+        return [
+          {
+            status:
+              report?.status ||
+              "submitted",
 
-          changedAt:
-            report?.createdAt,
-        },
-      ];
-    }, [report]);
+            changedAt:
+              report?.createdAt,
+          },
+        ];
+      },
+      [
+        report,
+      ]
+    );
 
   if (
     loading ||
@@ -1305,9 +1542,6 @@ export default function ReportDetailsPage() {
     return null;
   }
 
-  /*
-   * From this point onward we know the report exists.
-   */
   const currentReport: Report =
     report;
 
@@ -1507,7 +1741,9 @@ export default function ReportDetailsPage() {
                     value={
                       selectedStaffId
                     }
-                    onChange={(event) =>
+                    onChange={(
+                      event
+                    ) =>
                       setSelectedStaffId(
                         event.target.value
                       )
@@ -1525,7 +1761,9 @@ export default function ReportDetailsPage() {
                     </option>
 
                     {staffMembers.map(
-                      (member) => (
+                      (
+                        member
+                      ) => (
                         <option
                           key={
                             member.uid
@@ -1675,7 +1913,9 @@ export default function ReportDetailsPage() {
                   value={
                     newNote
                   }
-                  onChange={(event) =>
+                  onChange={(
+                    event
+                  ) =>
                     setNewNote(
                       event.target.value
                     )
@@ -1718,7 +1958,9 @@ export default function ReportDetailsPage() {
                     </p>
                   ) : (
                     caseNotes.map(
-                      (note) => (
+                      (
+                        note
+                      ) => (
                         <article
                           key={
                             note.id
@@ -1769,7 +2011,9 @@ export default function ReportDetailsPage() {
                     value={
                       newComment
                     }
-                    onChange={(event) =>
+                    onChange={(
+                      event
+                    ) =>
                       setNewComment(
                         event.target.value
                       )
@@ -1820,7 +2064,9 @@ export default function ReportDetailsPage() {
                   </div>
                 ) : (
                   publicComments.map(
-                    (comment) => (
+                    (
+                      comment
+                    ) => (
                       <article
                         key={
                           comment.id
@@ -1830,7 +2076,9 @@ export default function ReportDetailsPage() {
                         <div className="flex flex-wrap items-center gap-3">
                           <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-800 font-bold">
                             {comment.createdByName
-                              ?.charAt(0)
+                              ?.charAt(
+                                0
+                              )
                               .toUpperCase() ||
                               "C"}
                           </div>
@@ -1975,6 +2223,36 @@ export default function ReportDetailsPage() {
                 </button>
               )}
             </div>
+
+            {isStaff && (
+              <div className="mt-8 flex flex-wrap gap-3 border-t border-gray-800 pt-6">
+                <button
+                  type="button"
+                  onClick={() =>
+                    router.push(
+                      "/staff"
+                    )
+                  }
+                  className="rounded-lg border border-gray-700 px-4 py-3 font-semibold hover:bg-gray-800"
+                >
+                  My Assigned Cases
+                </button>
+
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      router.push(
+                        "/admin"
+                      )
+                    }
+                    className="rounded-lg border border-gray-700 px-4 py-3 font-semibold hover:bg-gray-800"
+                  >
+                    Operations Dashboard
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>
