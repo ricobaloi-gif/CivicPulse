@@ -1,85 +1,98 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import {
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+
+import {
+  useRouter,
+} from "next/navigation";
 
 import {
   collection,
   doc,
   getDoc,
   getDocs,
-  Timestamp,
+  query,
+  where,
 } from "firebase/firestore";
 
-import { db } from "@/src/lib/firebase";
-import { useAuth } from "@/src/lib/AuthContext";
+import {
+  db,
+} from "@/src/lib/firebase";
+
+import {
+  useAuth,
+} from "@/src/lib/AuthContext";
 
 type UserProfile = {
   uid?: string;
   name?: string;
   email?: string;
   role?: string;
+
+  organizationId?: string | null;
+  organizationName?: string | null;
+  organizationRole?: string | null;
 };
 
 type Report = {
   id: string;
 
   title: string;
-  description: string;
+  description?: string;
 
   category: string;
   severity: string;
   status: string;
 
-  assignedTo?: string | null;
-  assignedToName?: string | null;
-  assignedAt?: Timestamp | null;
-
   confirmationCount?: number;
 
-  createdAt?: Timestamp;
-  updatedAt?: Timestamp;
+  assignedTo?: string | null;
+  assignedToName?: string | null;
+
+  organizationId?: string | null;
+  organizationName?: string | null;
 };
 
-const statuses = [
-  "all",
-  "assigned",
-  "in-progress",
-  "resolved",
-  "reopened",
-];
-
-const severities = [
-  "all",
-  "critical",
-  "high",
-  "medium",
-  "low",
-];
-
-function getStatusLabel(status: string) {
+function getStatusLabel(
+  status: string
+) {
   switch (status) {
     case "submitted":
       return "Submitted";
+
     case "acknowledged":
       return "Acknowledged";
+
     case "assigned":
       return "Assigned";
+
     case "in-progress":
       return "In Progress";
+
     case "resolved":
       return "Resolved";
+
     case "reopened":
       return "Reopened";
+
     default:
       return status;
   }
 }
 
-function getStatusClasses(status: string) {
+function getStatusClasses(
+  status: string
+) {
   switch (status) {
     case "assigned":
       return "border-indigo-800 bg-indigo-950/40 text-indigo-300";
+
+    case "acknowledged":
+      return "border-purple-800 bg-purple-950/40 text-purple-300";
 
     case "in-progress":
       return "border-yellow-800 bg-yellow-950/40 text-yellow-300";
@@ -95,7 +108,9 @@ function getStatusClasses(status: string) {
   }
 }
 
-function getSeverityClasses(severity: string) {
+function getSeverityClasses(
+  severity: string
+) {
   switch (severity) {
     case "critical":
       return "border-red-800 bg-red-950/40 text-red-300";
@@ -114,95 +129,88 @@ function getSeverityClasses(severity: string) {
   }
 }
 
-function getCategoryIcon(category: string) {
-  switch (category) {
-    case "Pothole":
-      return "🕳️";
-
-    case "Water Leak":
-      return "💧";
-
-    case "Power Outage":
-      return "⚡";
-
-    case "Broken Streetlight":
-      return "💡";
-
-    case "Illegal Dumping":
-      return "⚠️";
-
-    case "Road Hazard":
-      return "🚧";
-
-    case "Sewer Issue":
-      return "☣️";
-
-    case "Vandalism":
-      return "🧱";
-
-    default:
-      return "📍";
-  }
-}
-
-function formatDate(timestamp?: Timestamp | null) {
-  if (!timestamp) {
-    return "Unknown";
-  }
-
-  return timestamp.toDate().toLocaleString();
-}
-
-export default function StaffDashboardPage() {
-  const router = useRouter();
+export default function StaffPage() {
+  const router =
+    useRouter();
 
   const {
     user,
     loading: authLoading,
   } = useAuth();
 
-  const [profile, setProfile] =
-    useState<UserProfile | null>(null);
+  const [
+    profile,
+    setProfile,
+  ] =
+    useState<UserProfile | null>(
+      null
+    );
 
-  const [reports, setReports] =
-    useState<Report[]>([]);
+  const [
+    reports,
+    setReports,
+  ] =
+    useState<Report[]>(
+      []
+    );
 
-  const [loading, setLoading] =
+  const [
+    loading,
+    setLoading,
+  ] =
     useState(true);
 
-  const [error, setError] =
+  const [
+    search,
+    setSearch,
+  ] =
     useState("");
 
-  const [search, setSearch] =
+  const [
+    statusFilter,
+    setStatusFilter,
+  ] =
+    useState("all");
+
+  const [
+    severityFilter,
+    setSeverityFilter,
+  ] =
+    useState("all");
+
+  const [
+    error,
+    setError,
+  ] =
     useState("");
 
-  const [statusFilter, setStatusFilter] =
-    useState("all");
-
-  const [severityFilter, setSeverityFilter] =
-    useState("all");
-
-  async function loadStaffDashboard() {
+  async function loadData() {
     if (!user) {
       return;
     }
+
+    const currentUser =
+      user;
 
     try {
       setLoading(true);
       setError("");
 
-      const userRef = doc(
-        db,
-        "users",
-        user.uid
-      );
+      const userRef =
+        doc(
+          db,
+          "users",
+          currentUser.uid
+        );
 
       const userSnapshot =
-        await getDoc(userRef);
+        await getDoc(
+          userRef
+        );
 
-      if (!userSnapshot.exists()) {
-        setProfile(null);
-
+      if (
+        !userSnapshot.exists()
+      ) {
         setError(
           "Your CivicPulse profile could not be found."
         );
@@ -210,69 +218,85 @@ export default function StaffDashboardPage() {
         return;
       }
 
-      const profileData =
+      const currentProfile =
         userSnapshot.data() as UserProfile;
 
-      setProfile(profileData);
+      setProfile(
+        currentProfile
+      );
 
       const role =
-        profileData.role
+        currentProfile.role
           ?.toLowerCase()
           .trim();
 
-      const authorised =
+      const allowed =
         role === "staff" ||
         role === "admin";
 
-      if (!authorised) {
-        setError(
-          "You do not have permission to access staff cases."
-        );
+      if (!allowed) {
+        setReports([]);
 
         return;
       }
 
-      const reportsSnapshot =
-        await getDocs(
+      if (
+        !currentProfile.organizationId
+      ) {
+        setReports([]);
+
+        return;
+      }
+
+      const organizationReportsQuery =
+        query(
           collection(
             db,
             "reports"
+          ),
+          where(
+            "organizationId",
+            "==",
+            currentProfile.organizationId
           )
         );
 
+      const snapshot =
+        await getDocs(
+          organizationReportsQuery
+        );
+
+      /*
+       * Important:
+       * Cast every Firestore document to Report BEFORE
+       * filtering it.
+       *
+       * This prevents TypeScript from thinking each report
+       * contains only { id: string }.
+       */
+      const organizationReports: Report[] =
+        snapshot.docs.map(
+          (
+            reportDoc
+          ) => ({
+            id:
+              reportDoc.id,
+
+            ...(reportDoc.data() as Omit<
+              Report,
+              "id"
+            >),
+          })
+        );
+
       const assignedReports =
-        reportsSnapshot.docs
-          .map((reportDoc) => ({
-            id: reportDoc.id,
-            ...reportDoc.data(),
-          }))
-          .filter((report) => {
-            const item =
-              report as Report;
-
-            return (
-              item.assignedTo ===
-              user.uid
-            );
-          }) as Report[];
-
-      assignedReports.sort(
-        (a, b) => {
-          const aTime =
-            a.assignedAt?.seconds ??
-            a.updatedAt?.seconds ??
-            a.createdAt?.seconds ??
-            0;
-
-          const bTime =
-            b.assignedAt?.seconds ??
-            b.updatedAt?.seconds ??
-            b.createdAt?.seconds ??
-            0;
-
-          return bTime - aTime;
-        }
-      );
+        organizationReports.filter(
+          (
+            report
+          ) =>
+            report.assignedTo ===
+            currentUser.uid
+        );
 
       setReports(
         assignedReports
@@ -284,7 +308,7 @@ export default function StaffDashboardPage() {
       );
 
       setError(
-        "Failed to load your assigned cases."
+        "Unable to load your assigned cases."
       );
     } finally {
       setLoading(false);
@@ -292,7 +316,9 @@ export default function StaffDashboardPage() {
   }
 
   useEffect(() => {
-    if (authLoading) {
+    if (
+      authLoading
+    ) {
       return;
     }
 
@@ -304,104 +330,128 @@ export default function StaffDashboardPage() {
       return;
     }
 
-    loadStaffDashboard();
+    loadData();
   }, [
     user,
     authLoading,
   ]);
 
+  const role =
+    profile?.role
+      ?.toLowerCase()
+      .trim();
+
+  const isStaff =
+    role === "staff" ||
+    role === "admin";
+
+  const isAdmin =
+    role === "admin";
+
   const filteredReports =
-    useMemo(() => {
-      const searchTerm =
-        search
-          .trim()
-          .toLowerCase();
+    useMemo(
+      () => {
+        const normalizedSearch =
+          search
+            .trim()
+            .toLowerCase();
 
-      return reports.filter(
-        (report) => {
-          const matchesSearch =
-            !searchTerm ||
-            report.title
-              ?.toLowerCase()
-              .includes(
-                searchTerm
-              ) ||
-            report.description
-              ?.toLowerCase()
-              .includes(
-                searchTerm
-              ) ||
-            report.category
-              ?.toLowerCase()
-              .includes(
-                searchTerm
-              );
+        return reports.filter(
+          (
+            report
+          ) => {
+            if (
+              statusFilter !==
+                "all" &&
+              report.status !==
+                statusFilter
+            ) {
+              return false;
+            }
 
-          const matchesStatus =
-            statusFilter ===
-              "all" ||
-            report.status ===
-              statusFilter;
+            if (
+              severityFilter !==
+                "all" &&
+              report.severity !==
+                severityFilter
+            ) {
+              return false;
+            }
 
-          const matchesSeverity =
-            severityFilter ===
-              "all" ||
-            report.severity ===
-              severityFilter;
+            if (
+              !normalizedSearch
+            ) {
+              return true;
+            }
 
-          return (
-            matchesSearch &&
-            matchesStatus &&
-            matchesSeverity
-          );
-        }
-      );
-    }, [
-      reports,
-      search,
-      statusFilter,
-      severityFilter,
-    ]);
+            const haystack =
+              [
+                report.title,
+                report.description,
+                report.category,
+                report.status,
+                report.severity,
+              ]
+                .filter(
+                  Boolean
+                )
+                .join(
+                  " "
+                )
+                .toLowerCase();
 
-  const activeCount =
+            return haystack.includes(
+              normalizedSearch
+            );
+          }
+        );
+      },
+
+      [
+        reports,
+        search,
+        statusFilter,
+        severityFilter,
+      ]
+    );
+
+  const activeCases =
     reports.filter(
-      (report) =>
-        report.status ===
-          "assigned" ||
-        report.status ===
-          "in-progress" ||
-        report.status ===
-          "reopened"
+      (
+        report
+      ) =>
+        report.status !==
+          "resolved"
     ).length;
 
-  const inProgressCount =
+  const inProgress =
     reports.filter(
-      (report) =>
+      (
+        report
+      ) =>
         report.status ===
-        "in-progress"
+          "in-progress"
     ).length;
 
-  const resolvedCount =
+  const resolved =
     reports.filter(
-      (report) =>
+      (
+        report
+      ) =>
         report.status ===
-        "resolved"
+          "resolved"
     ).length;
 
-  const criticalCount =
+  const criticalOpen =
     reports.filter(
-      (report) =>
+      (
+        report
+      ) =>
         report.severity ===
           "critical" &&
         report.status !==
           "resolved"
     ).length;
-
-  function clearFilters() {
-    setSearch("");
-    setStatusFilter("all");
-    setSeverityFilter("all");
-  }
 
   if (
     authLoading ||
@@ -420,16 +470,11 @@ export default function StaffDashboardPage() {
     );
   }
 
-  const role =
-    profile?.role
-      ?.toLowerCase()
-      .trim();
+  if (!user) {
+    return null;
+  }
 
-  const isAuthorised =
-    role === "staff" ||
-    role === "admin";
-
-  if (!isAuthorised) {
+  if (!isStaff) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-gray-950 p-6 text-white">
         <div className="w-full max-w-lg rounded-2xl border border-red-900 bg-gray-900 p-8 text-center">
@@ -442,11 +487,11 @@ export default function StaffDashboardPage() {
           </h1>
 
           <p className="mt-3 text-gray-400">
-            {error ||
-              "This area is restricted to CivicPulse staff."}
+            This page is available only to CivicPulse staff.
           </p>
 
           <button
+            type="button"
             onClick={() =>
               router.push(
                 "/dashboard"
@@ -454,7 +499,41 @@ export default function StaffDashboardPage() {
             }
             className="mt-6 rounded-lg bg-blue-600 px-6 py-3 font-semibold hover:bg-blue-500"
           >
-            Return to Dashboard
+            Dashboard
+          </button>
+        </div>
+      </main>
+    );
+  }
+
+  if (
+    !profile?.organizationId
+  ) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-gray-950 p-6 text-white">
+        <div className="w-full max-w-lg rounded-2xl border border-gray-800 bg-gray-900 p-8 text-center">
+          <div className="text-5xl">
+            🏢
+          </div>
+
+          <h1 className="mt-5 text-3xl font-bold">
+            No Organisation
+          </h1>
+
+          <p className="mt-3 text-gray-400">
+            Your staff account needs to belong to an organisation before cases can be assigned to you.
+          </p>
+
+          <button
+            type="button"
+            onClick={() =>
+              router.push(
+                "/dashboard"
+              )
+            }
+            className="mt-6 rounded-lg bg-blue-600 px-6 py-3 font-semibold hover:bg-blue-500"
+          >
+            Dashboard
           </button>
         </div>
       </main>
@@ -463,26 +542,36 @@ export default function StaffDashboardPage() {
 
   return (
     <main className="min-h-screen bg-gray-950 text-white">
-      <div className="mx-auto max-w-7xl p-6 lg:p-8">
-        <header className="flex flex-col gap-5 border-b border-gray-800 pb-7 lg:flex-row lg:items-center lg:justify-between">
+      <div className="mx-auto max-w-6xl p-6 lg:p-8">
+        <header className="flex flex-col gap-5 border-b border-gray-800 pb-7 md:flex-row md:items-center md:justify-between">
           <div>
-            <div className="flex flex-wrap items-center gap-3">
-              <h1 className="text-3xl font-bold sm:text-4xl">
-                My Assigned Cases
-              </h1>
+            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-indigo-400">
+              Assigned Cases
+            </p>
 
-              <span className="rounded-full border border-indigo-800 bg-indigo-950/50 px-3 py-1 text-xs font-bold uppercase tracking-wider text-indigo-300">
-                {role}
-              </span>
-            </div>
+            <h1 className="mt-2 text-3xl font-bold sm:text-4xl">
+              My Cases
+            </h1>
 
             <p className="mt-2 text-gray-400">
-              Manage the CivicPulse cases assigned directly to you.
+              {
+                profile.organizationName
+              }
             </p>
           </div>
 
           <div className="flex flex-wrap gap-3">
-            {role === "admin" && (
+            <button
+              type="button"
+              onClick={
+                loadData
+              }
+              className="rounded-lg border border-gray-700 bg-gray-900 px-4 py-3 font-semibold hover:bg-gray-800"
+            >
+              ↻ Refresh
+            </button>
+
+            {isAdmin && (
               <button
                 type="button"
                 onClick={() =>
@@ -490,9 +579,9 @@ export default function StaffDashboardPage() {
                     "/admin"
                   )
                 }
-                className="rounded-lg border border-gray-700 bg-gray-900 px-4 py-3 font-semibold hover:bg-gray-800"
+                className="rounded-lg border border-blue-800 bg-blue-950/30 px-4 py-3 font-semibold text-blue-300 hover:bg-blue-950"
               >
-                🛡️ Operations
+                Operations
               </button>
             )}
 
@@ -503,283 +592,207 @@ export default function StaffDashboardPage() {
                   "/dashboard"
                 )
               }
-              className="rounded-lg border border-gray-700 bg-gray-900 px-4 py-3 font-semibold hover:bg-gray-800"
+              className="rounded-lg bg-blue-600 px-4 py-3 font-semibold hover:bg-blue-500"
             >
               Dashboard
-            </button>
-
-            <button
-              type="button"
-              onClick={
-                loadStaffDashboard
-              }
-              className="rounded-lg bg-indigo-600 px-4 py-3 font-semibold hover:bg-indigo-500"
-            >
-              ↻ Refresh
             </button>
           </div>
         </header>
 
         {error && (
           <div className="mt-6 rounded-xl border border-red-900 bg-red-950/30 p-4 text-red-300">
-            {error}
+            {
+              error
+            }
           </div>
         )}
 
-        <section className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <button
-            type="button"
-            onClick={() => {
-              setStatusFilter(
-                "all"
-              );
-
-              setSeverityFilter(
-                "all"
-              );
-            }}
-            className="rounded-2xl border border-gray-800 bg-gray-900 p-6 text-left transition hover:border-indigo-600"
-          >
-            <p className="text-sm text-gray-400">
+        <section className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="rounded-2xl border border-indigo-900 bg-indigo-950/20 p-6">
+            <p className="text-sm text-indigo-300">
               Active Cases
             </p>
 
-            <p className="mt-2 text-4xl font-bold">
-              {activeCount}
+            <p className="mt-3 text-4xl font-bold">
+              {
+                activeCases
+              }
             </p>
+          </div>
 
-            <p className="mt-2 text-sm text-indigo-400">
-              Currently assigned
-            </p>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setStatusFilter(
-                "in-progress"
-              );
-
-              setSeverityFilter(
-                "all"
-              );
-            }}
-            className="rounded-2xl border border-gray-800 bg-gray-900 p-6 text-left transition hover:border-yellow-600"
-          >
-            <p className="text-sm text-gray-400">
+          <div className="rounded-2xl border border-yellow-900 bg-yellow-950/20 p-6">
+            <p className="text-sm text-yellow-300">
               In Progress
             </p>
 
-            <p className="mt-2 text-4xl font-bold">
-              {inProgressCount}
+            <p className="mt-3 text-4xl font-bold">
+              {
+                inProgress
+              }
             </p>
+          </div>
 
-            <p className="mt-2 text-sm text-yellow-400">
-              Work underway
-            </p>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setStatusFilter(
-                "resolved"
-              );
-
-              setSeverityFilter(
-                "all"
-              );
-            }}
-            className="rounded-2xl border border-gray-800 bg-gray-900 p-6 text-left transition hover:border-green-600"
-          >
-            <p className="text-sm text-gray-400">
+          <div className="rounded-2xl border border-green-900 bg-green-950/20 p-6">
+            <p className="text-sm text-green-300">
               Resolved
             </p>
 
-            <p className="mt-2 text-4xl font-bold">
-              {resolvedCount}
+            <p className="mt-3 text-4xl font-bold">
+              {
+                resolved
+              }
             </p>
+          </div>
 
-            <p className="mt-2 text-sm text-green-400">
-              Completed cases
-            </p>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setStatusFilter(
-                "all"
-              );
-
-              setSeverityFilter(
-                "critical"
-              );
-            }}
-            className="rounded-2xl border border-red-900/60 bg-red-950/20 p-6 text-left transition hover:border-red-600"
-          >
+          <div className="rounded-2xl border border-red-900 bg-red-950/20 p-6">
             <p className="text-sm text-red-300">
               Critical Open
             </p>
 
-            <p className="mt-2 text-4xl font-bold text-red-300">
-              {criticalCount}
+            <p className="mt-3 text-4xl font-bold">
+              {
+                criticalOpen
+              }
             </p>
-
-            <p className="mt-2 text-sm text-red-400">
-              Needs attention
-            </p>
-          </button>
+          </div>
         </section>
 
         <section className="mt-8 rounded-2xl border border-gray-800 bg-gray-900 p-5">
-          <div className="grid gap-4 lg:grid-cols-3">
-            <div>
-              <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-gray-500">
-                Search
-              </label>
-
-              <input
-                type="text"
-                value={search}
-                onChange={(event) =>
-                  setSearch(
-                    event.target.value
-                  )
-                }
-                placeholder="Search my cases..."
-                className="w-full rounded-lg border border-gray-700 bg-gray-950 px-4 py-3 outline-none placeholder:text-gray-600 focus:border-indigo-500"
-              />
-            </div>
-
-            <div>
-              <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-gray-500">
-                Status
-              </label>
-
-              <select
-                value={
-                  statusFilter
-                }
-                onChange={(event) =>
-                  setStatusFilter(
-                    event.target.value
-                  )
-                }
-                className="w-full rounded-lg border border-gray-700 bg-gray-950 px-4 py-3"
-              >
-                {statuses.map(
-                  (status) => (
-                    <option
-                      key={status}
-                      value={status}
-                    >
-                      {status === "all"
-                        ? "All Statuses"
-                        : getStatusLabel(
-                            status
-                          )}
-                    </option>
-                  )
-                )}
-              </select>
-            </div>
-
-            <div>
-              <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-gray-500">
-                Severity
-              </label>
-
-              <select
-                value={
-                  severityFilter
-                }
-                onChange={(event) =>
-                  setSeverityFilter(
-                    event.target.value
-                  )
-                }
-                className="w-full rounded-lg border border-gray-700 bg-gray-950 px-4 py-3"
-              >
-                {severities.map(
-                  (severity) => (
-                    <option
-                      key={severity}
-                      value={severity}
-                    >
-                      {severity ===
-                      "all"
-                        ? "All Severities"
-                        : severity
-                            .charAt(0)
-                            .toUpperCase() +
-                          severity.slice(
-                            1
-                          )}
-                    </option>
-                  )
-                )}
-              </select>
-            </div>
-          </div>
-
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-4">
-            <p className="text-sm text-gray-400">
-              Showing{" "}
-              <span className="font-semibold text-white">
-                {
-                  filteredReports.length
-                }
-              </span>{" "}
-              of{" "}
-              <span className="font-semibold text-white">
-                {reports.length}
-              </span>{" "}
-              assigned cases
-            </p>
-
-            <button
-              type="button"
-              onClick={
-                clearFilters
+          <div className="grid gap-4 md:grid-cols-3">
+            <input
+              type="text"
+              value={
+                search
               }
-              className="text-sm font-semibold text-indigo-400 hover:text-indigo-300"
+              onChange={(
+                event
+              ) =>
+                setSearch(
+                  event.target.value
+                )
+              }
+              placeholder="Search assigned cases..."
+              className="rounded-xl border border-gray-700 bg-gray-950 px-4 py-3 outline-none placeholder:text-gray-600 focus:border-indigo-500"
+            />
+
+            <select
+              value={
+                statusFilter
+              }
+              onChange={(
+                event
+              ) =>
+                setStatusFilter(
+                  event.target.value
+                )
+              }
+              className="rounded-xl border border-gray-700 bg-gray-950 px-4 py-3 outline-none"
             >
-              Clear Filters
-            </button>
+              <option value="all">
+                All Statuses
+              </option>
+
+              <option value="acknowledged">
+                Acknowledged
+              </option>
+
+              <option value="assigned">
+                Assigned
+              </option>
+
+              <option value="in-progress">
+                In Progress
+              </option>
+
+              <option value="resolved">
+                Resolved
+              </option>
+
+              <option value="reopened">
+                Reopened
+              </option>
+            </select>
+
+            <select
+              value={
+                severityFilter
+              }
+              onChange={(
+                event
+              ) =>
+                setSeverityFilter(
+                  event.target.value
+                )
+              }
+              className="rounded-xl border border-gray-700 bg-gray-950 px-4 py-3 outline-none"
+            >
+              <option value="all">
+                All Severities
+              </option>
+
+              <option value="critical">
+                Critical
+              </option>
+
+              <option value="high">
+                High
+              </option>
+
+              <option value="medium">
+                Medium
+              </option>
+
+              <option value="low">
+                Low
+              </option>
+            </select>
           </div>
         </section>
 
-        <section className="mt-6">
-          {filteredReports.length ===
+        <section className="mt-8">
+          <div>
+            <h2 className="text-2xl font-bold">
+              Assigned to Me
+            </h2>
+
+            <p className="mt-1 text-sm text-gray-500">
+              {
+                filteredReports.length
+              }{" "}
+              case
+              {filteredReports.length ===
+              1
+                ? ""
+                : "s"}
+            </p>
+          </div>
+
+          {reports.length ===
           0 ? (
-            <div className="rounded-2xl border border-gray-800 bg-gray-900 p-12 text-center">
+            <div className="mt-6 rounded-2xl border border-dashed border-gray-700 p-12 text-center">
               <div className="text-5xl">
                 🗂️
               </div>
 
-              <h2 className="mt-5 text-2xl font-bold">
-                No assigned cases
-              </h2>
+              <h3 className="mt-4 text-xl font-bold">
+                No cases assigned
+              </h3>
 
-              <p className="mt-2 text-gray-400">
-                You currently have no cases matching these filters.
+              <p className="mt-2 text-gray-500">
+                Cases assigned to you by your organisation will appear here.
               </p>
-
-              <button
-                type="button"
-                onClick={
-                  clearFilters
-                }
-                className="mt-5 rounded-lg bg-indigo-600 px-5 py-3 font-semibold hover:bg-indigo-500"
-              >
-                Clear Filters
-              </button>
+            </div>
+          ) : filteredReports.length ===
+            0 ? (
+            <div className="mt-6 rounded-2xl border border-dashed border-gray-700 p-10 text-center text-gray-400">
+              No assigned cases match your filters.
             </div>
           ) : (
-            <div className="space-y-4">
+            <div className="mt-6 space-y-4">
               {filteredReports.map(
-                (report) => (
+                (
+                  report
+                ) => (
                   <button
                     key={
                       report.id
@@ -790,16 +803,10 @@ export default function StaffDashboardPage() {
                         `/report/${report.id}`
                       )
                     }
-                    className="w-full rounded-2xl border border-gray-800 bg-gray-900 p-5 text-left transition hover:border-indigo-600"
+                    className="w-full rounded-2xl border border-gray-800 bg-gray-900 p-6 text-left transition hover:border-indigo-600"
                   >
-                    <div className="flex flex-col gap-5 lg:flex-row lg:items-center">
-                      <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-gray-800 text-3xl">
-                        {getCategoryIcon(
-                          report.category
-                        )}
-                      </div>
-
-                      <div className="min-w-0 flex-1">
+                    <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
                           <span
                             className={`rounded-full border px-3 py-1 text-xs font-semibold ${getStatusClasses(
@@ -821,54 +828,39 @@ export default function StaffDashboardPage() {
                             }
                           </span>
 
-                          <span className="rounded-full border border-gray-700 bg-gray-800 px-3 py-1 text-xs text-gray-300">
+                          <span className="rounded-full border border-gray-700 bg-gray-950 px-3 py-1 text-xs text-gray-400">
                             {
                               report.category
                             }
                           </span>
                         </div>
 
-                        <h2 className="mt-3 truncate text-xl font-bold">
+                        <h3 className="mt-4 text-xl font-bold">
                           {
                             report.title
                           }
-                        </h2>
+                        </h3>
 
-                        <p className="mt-2 line-clamp-2 text-sm leading-6 text-gray-400">
+                        {report.description && (
+                          <p className="mt-2 line-clamp-2 max-w-3xl text-sm leading-6 text-gray-400">
+                            {
+                              report.description
+                            }
+                          </p>
+                        )}
+
+                        <p className="mt-4 text-sm text-gray-500">
+                          Confirmations:{" "}
                           {
-                            report.description
+                            report.confirmationCount ??
+                            0
                           }
                         </p>
                       </div>
 
-                      <div className="grid shrink-0 grid-cols-2 gap-4 border-gray-800 lg:min-w-72 lg:border-l lg:pl-6">
-                        <div>
-                          <p className="text-xs uppercase tracking-wider text-gray-500">
-                            Confirmations
-                          </p>
-
-                          <p className="mt-1 text-xl font-bold">
-                            {report.confirmationCount ??
-                              0}
-                          </p>
-                        </div>
-
-                        <div>
-                          <p className="text-xs uppercase tracking-wider text-gray-500">
-                            Assigned
-                          </p>
-
-                          <p className="mt-1 text-sm text-gray-300">
-                            {formatDate(
-                              report.assignedAt
-                            )}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="text-xl text-gray-500">
-                        →
-                      </div>
+                      <span className="shrink-0 font-semibold text-indigo-400">
+                        Open case →
+                      </span>
                     </div>
                   </button>
                 )

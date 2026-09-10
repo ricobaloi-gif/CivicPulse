@@ -27,12 +27,8 @@ import {
 } from "firebase/firestore";
 
 import { db } from "@/src/lib/firebase";
-
 import { useAuth } from "@/src/lib/AuthContext";
-
-import {
-  createNotification,
-} from "@/src/lib/notifications";
+import { createNotification } from "@/src/lib/notifications";
 
 type StatusHistoryItem = {
   status: string;
@@ -53,7 +49,6 @@ type Report = {
   imageUrl?: string | null;
 
   createdBy: string;
-  createdByEmail?: string | null;
 
   confirmationCount?: number;
   confirmedBy?: string[];
@@ -61,6 +56,9 @@ type Report = {
   assignedTo?: string | null;
   assignedToName?: string | null;
   assignedAt?: Timestamp | null;
+
+  organizationId?: string | null;
+  organizationName?: string | null;
 
   createdAt?: Timestamp;
   updatedAt?: Timestamp;
@@ -73,6 +71,9 @@ type UserProfile = {
   name?: string;
   email?: string;
   role?: string;
+  organizationId?: string | null;
+  organizationName?: string | null;
+  organizationRole?: string | null;
 };
 
 type CaseNote = {
@@ -92,177 +93,120 @@ type PublicComment = {
   createdAt?: Timestamp | null;
 };
 
-function getStatusLabel(
-  status: string
-) {
+function getStatusLabel(status: string) {
   switch (status) {
     case "submitted":
       return "Submitted";
-
     case "verified":
       return "Verified";
-
     case "acknowledged":
       return "Acknowledged";
-
     case "assigned":
       return "Assigned";
-
     case "in-progress":
       return "In Progress";
-
     case "resolved":
       return "Resolved";
-
     case "rejected":
       return "Rejected";
-
     case "duplicate":
       return "Duplicate";
-
     case "reopened":
       return "Reopened";
-
     default:
       return status;
   }
 }
 
-function getStatusIcon(
-  status: string
-) {
+function getStatusIcon(status: string) {
   switch (status) {
     case "submitted":
       return "📝";
-
     case "verified":
       return "✅";
-
     case "acknowledged":
       return "👀";
-
     case "assigned":
       return "👤";
-
     case "in-progress":
       return "🛠️";
-
     case "resolved":
       return "🎉";
-
     case "rejected":
       return "❌";
-
     case "duplicate":
       return "📎";
-
     case "reopened":
       return "🔄";
-
     default:
       return "●";
   }
 }
 
-function getStatusBadgeClasses(
-  status: string
-) {
+function getStatusBadgeClasses(status: string) {
   switch (status) {
     case "submitted":
       return "bg-blue-950 text-blue-300";
-
     case "acknowledged":
       return "bg-purple-950 text-purple-300";
-
     case "assigned":
       return "bg-indigo-950 text-indigo-300";
-
     case "in-progress":
       return "bg-yellow-950 text-yellow-300";
-
     case "resolved":
       return "bg-green-950 text-green-300";
-
     case "reopened":
       return "bg-orange-950 text-orange-300";
-
     case "rejected":
       return "bg-red-950 text-red-300";
-
     default:
       return "bg-gray-800 text-gray-300";
   }
 }
 
-function getSeverityBadgeClasses(
-  severity: string
-) {
+function getSeverityBadgeClasses(severity: string) {
   switch (severity) {
     case "critical":
       return "bg-red-950 text-red-300";
-
     case "high":
       return "bg-orange-950 text-orange-300";
-
     case "medium":
       return "bg-yellow-950 text-yellow-300";
-
     case "low":
       return "bg-green-950 text-green-300";
-
     default:
       return "bg-gray-800 text-gray-300";
   }
 }
 
-function getRoleBadgeClasses(
-  role: string
-) {
-  switch (
-    role
-      .toLowerCase()
-      .trim()
-  ) {
+function getRoleBadgeClasses(role: string) {
+  switch (role.toLowerCase().trim()) {
     case "admin":
       return "border-blue-800 bg-blue-950/40 text-blue-300";
-
     case "staff":
       return "border-indigo-800 bg-indigo-950/40 text-indigo-300";
-
     default:
       return "border-gray-700 bg-gray-800 text-gray-300";
   }
 }
 
-function getRoleLabel(
-  role: string
-) {
-  switch (
-    role
-      .toLowerCase()
-      .trim()
-  ) {
+function getRoleLabel(role: string) {
+  switch (role.toLowerCase().trim()) {
     case "admin":
       return "Admin";
-
     case "staff":
       return "Staff";
-
     default:
       return "Resident";
   }
 }
 
-function formatTimestamp(
-  value?: Timestamp | Date | null
-) {
+function formatTimestamp(value?: Timestamp | Date | null) {
   if (!value) {
     return "Time unavailable";
   }
 
-  if (
-    value instanceof Date
-  ) {
+  if (value instanceof Date) {
     return value.toLocaleString();
   }
 
@@ -270,158 +214,45 @@ function formatTimestamp(
     typeof value === "object" &&
     typeof value.toDate === "function"
   ) {
-    return value
-      .toDate()
-      .toLocaleString();
+    return value.toDate().toLocaleString();
   }
 
   return "Time unavailable";
 }
 
 export default function ReportDetailsPage() {
-  const params =
-    useParams();
-
-  const router =
-    useRouter();
+  const params = useParams();
+  const router = useRouter();
 
   const {
     user,
     loading: authLoading,
   } = useAuth();
 
-  const reportId =
-    params.id as string;
+  const reportId = params.id as string;
 
-  const [
-    report,
-    setReport,
-  ] =
-    useState<Report | null>(
-      null
-    );
+  const [report, setReport] = useState<Report | null>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [staffMembers, setStaffMembers] = useState<UserProfile[]>([]);
+  const [selectedStaffId, setSelectedStaffId] = useState("");
+  const [caseNotes, setCaseNotes] = useState<CaseNote[]>([]);
+  const [publicComments, setPublicComments] = useState<PublicComment[]>([]);
+  const [newNote, setNewNote] = useState("");
+  const [newComment, setNewComment] = useState("");
 
-  const [
-    profile,
-    setProfile,
-  ] =
-    useState<UserProfile | null>(
-      null
-    );
+  const [loading, setLoading] = useState(true);
+  const [profileLoading, setProfileLoading] = useState(true);
+  const [staffLoading, setStaffLoading] = useState(false);
+  const [notesLoading, setNotesLoading] = useState(false);
+  const [commentsLoading, setCommentsLoading] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [updatingStatus, setUpdatingStatus] = useState(false);
+  const [assigning, setAssigning] = useState(false);
+  const [addingNote, setAddingNote] = useState(false);
+  const [addingComment, setAddingComment] = useState(false);
 
-  const [
-    staffMembers,
-    setStaffMembers,
-  ] =
-    useState<UserProfile[]>(
-      []
-    );
-
-  const [
-    selectedStaffId,
-    setSelectedStaffId,
-  ] =
-    useState("");
-
-  const [
-    caseNotes,
-    setCaseNotes,
-  ] =
-    useState<CaseNote[]>(
-      []
-    );
-
-  const [
-    publicComments,
-    setPublicComments,
-  ] =
-    useState<PublicComment[]>(
-      []
-    );
-
-  const [
-    newNote,
-    setNewNote,
-  ] =
-    useState("");
-
-  const [
-    newComment,
-    setNewComment,
-  ] =
-    useState("");
-
-  const [
-    loading,
-    setLoading,
-  ] =
-    useState(true);
-
-  const [
-    profileLoading,
-    setProfileLoading,
-  ] =
-    useState(true);
-
-  const [
-    staffLoading,
-    setStaffLoading,
-  ] =
-    useState(false);
-
-  const [
-    notesLoading,
-    setNotesLoading,
-  ] =
-    useState(false);
-
-  const [
-    commentsLoading,
-    setCommentsLoading,
-  ] =
-    useState(false);
-
-  const [
-    confirming,
-    setConfirming,
-  ] =
-    useState(false);
-
-  const [
-    updatingStatus,
-    setUpdatingStatus,
-  ] =
-    useState(false);
-
-  const [
-    assigning,
-    setAssigning,
-  ] =
-    useState(false);
-
-  const [
-    addingNote,
-    setAddingNote,
-  ] =
-    useState(false);
-
-  const [
-    addingComment,
-    setAddingComment,
-  ] =
-    useState(false);
-
-  const [
-    error,
-    setError,
-  ] =
-    useState("");
-
-  const [
-    success,
-    setSuccess,
-  ] =
-    useState("");
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
 
   async function loadReport() {
     if (!reportId) {
@@ -431,36 +262,26 @@ export default function ReportDetailsPage() {
     try {
       setLoading(true);
 
-      const reportRef =
-        doc(
-          db,
-          "reports",
-          reportId
-        );
+      const reportRef = doc(
+        db,
+        "reports",
+        reportId
+      );
 
-      const snapshot =
-        await getDoc(
-          reportRef
-        );
+      const snapshot = await getDoc(
+        reportRef
+      );
 
-      if (
-        !snapshot.exists()
-      ) {
+      if (!snapshot.exists()) {
         setReport(null);
-
-        setError(
-          "Report not found."
-        );
-
+        setError("Report not found or you do not have access to it.");
         return;
       }
 
       const data =
         snapshot.data() as Report;
 
-      setReport(
-        data
-      );
+      setReport(data);
 
       setSelectedStaffId(
         data.assignedTo ?? ""
@@ -471,8 +292,9 @@ export default function ReportDetailsPage() {
         err
       );
 
+      setReport(null);
       setError(
-        "Failed to load report."
+        "Report not found or you do not have access to it."
       );
     } finally {
       setLoading(false);
@@ -483,37 +305,31 @@ export default function ReportDetailsPage() {
     if (!user) {
       setProfile(null);
       setProfileLoading(false);
-
       return;
     }
+
+    const currentUser = user;
 
     try {
       setProfileLoading(true);
 
-      const userRef =
-        doc(
-          db,
-          "users",
-          user.uid
-        );
+      const userRef = doc(
+        db,
+        "users",
+        currentUser.uid
+      );
 
-      const snapshot =
-        await getDoc(
-          userRef
-        );
+      const snapshot = await getDoc(
+        userRef
+      );
 
-      if (
-        !snapshot.exists()
-      ) {
+      if (!snapshot.exists()) {
         setProfile({
-          uid:
-            user.uid,
-
-          email:
-            user.email ?? "",
-
-          role:
-            "resident",
+          uid: currentUser.uid,
+          email: currentUser.email ?? "",
+          role: "resident",
+          organizationId: null,
+          organizationName: null,
         });
 
         return;
@@ -529,14 +345,11 @@ export default function ReportDetailsPage() {
       );
 
       setProfile({
-        uid:
-          user.uid,
-
-        email:
-          user.email ?? "",
-
-        role:
-          "resident",
+        uid: currentUser.uid,
+        email: currentUser.email ?? "",
+        role: "resident",
+        organizationId: null,
+        organizationName: null,
       });
     } finally {
       setProfileLoading(false);
@@ -544,61 +357,54 @@ export default function ReportDetailsPage() {
   }
 
   async function loadStaffMembers() {
+    if (
+      !profile?.organizationId
+    ) {
+      setStaffMembers([]);
+      return;
+    }
+
     try {
       setStaffLoading(true);
 
-      const snapshot =
-        await getDocs(
-          collection(
-            db,
-            "users"
-          )
+      const snapshot = await getDocs(
+        collection(
+          db,
+          "users"
+        )
+      );
+
+      const members = snapshot.docs
+        .map((item) => ({
+          uid: item.id,
+          ...(item.data() as Omit<UserProfile, "uid">),
+        }))
+        .filter((member) => {
+          const role = member.role
+            ?.toLowerCase()
+            .trim();
+
+          return (
+            (role === "staff" ||
+              role === "admin") &&
+            member.organizationId ===
+              profile.organizationId
+          );
+        });
+
+      members.sort((a, b) => {
+        const aName =
+          a.name || a.email || "";
+
+        const bName =
+          b.name || b.email || "";
+
+        return aName.localeCompare(
+          bName
         );
+      });
 
-      const members =
-        snapshot.docs
-          .map(
-            (item) =>
-              item.data() as UserProfile
-          )
-          .filter(
-            (member) => {
-              const role =
-                member.role
-                  ?.toLowerCase()
-                  .trim();
-
-              return (
-                role === "staff" ||
-                role === "admin"
-              );
-            }
-          );
-
-      members.sort(
-        (
-          a,
-          b
-        ) => {
-          const aName =
-            a.name ||
-            a.email ||
-            "";
-
-          const bName =
-            b.name ||
-            b.email ||
-            "";
-
-          return aName.localeCompare(
-            bName
-          );
-        }
-      );
-
-      setStaffMembers(
-        members
-      );
+      setStaffMembers(members);
     } catch (err) {
       console.error(
         "Load staff error:",
@@ -621,40 +427,31 @@ export default function ReportDetailsPage() {
     try {
       setNotesLoading(true);
 
-      const notesQuery =
-        query(
-          collection(
-            db,
-            "reports",
-            reportId,
-            "caseNotes"
-          ),
-          orderBy(
-            "createdAt",
-            "desc"
-          )
-        );
-
-      const snapshot =
-        await getDocs(
-          notesQuery
-        );
-
-      const notes =
-        snapshot.docs.map(
-          (
-            noteDoc
-          ) => ({
-            id:
-              noteDoc.id,
-
-            ...noteDoc.data(),
-          })
-        ) as CaseNote[];
-
-      setCaseNotes(
-        notes
+      const notesQuery = query(
+        collection(
+          db,
+          "reports",
+          reportId,
+          "caseNotes"
+        ),
+        orderBy(
+          "createdAt",
+          "desc"
+        )
       );
+
+      const snapshot = await getDocs(
+        notesQuery
+      );
+
+      const notes = snapshot.docs.map(
+        (noteDoc) => ({
+          id: noteDoc.id,
+          ...noteDoc.data(),
+        })
+      ) as CaseNote[];
+
+      setCaseNotes(notes);
     } catch (err) {
       console.error(
         "Load case notes error:",
@@ -677,36 +474,29 @@ export default function ReportDetailsPage() {
     try {
       setCommentsLoading(true);
 
-      const commentsQuery =
-        query(
-          collection(
-            db,
-            "reports",
-            reportId,
-            "comments"
-          ),
-          orderBy(
-            "createdAt",
-            "asc"
-          )
-        );
+      const commentsQuery = query(
+        collection(
+          db,
+          "reports",
+          reportId,
+          "comments"
+        ),
+        orderBy(
+          "createdAt",
+          "asc"
+        )
+      );
 
-      const snapshot =
-        await getDocs(
-          commentsQuery
-        );
+      const snapshot = await getDocs(
+        commentsQuery
+      );
 
-      const comments =
-        snapshot.docs.map(
-          (
-            commentDoc
-          ) => ({
-            id:
-              commentDoc.id,
-
-            ...commentDoc.data(),
-          })
-        ) as PublicComment[];
+      const comments = snapshot.docs.map(
+        (commentDoc) => ({
+          id: commentDoc.id,
+          ...commentDoc.data(),
+        })
+      ) as PublicComment[];
 
       setPublicComments(
         comments
@@ -726,33 +516,22 @@ export default function ReportDetailsPage() {
   }
 
   useEffect(() => {
-    if (
-      reportId
-    ) {
+    if (reportId) {
       loadReport();
-
       loadPublicComments();
     }
-  }, [
-    reportId,
-  ]);
+  }, [reportId]);
 
   useEffect(() => {
-    if (
-      !authLoading
-    ) {
+    if (!authLoading) {
       loadUserProfile();
     }
-  }, [
-    user,
-    authLoading,
-  ]);
+  }, [user, authLoading]);
 
   const userRole =
     profile?.role
       ?.toLowerCase()
-      .trim() ||
-    "resident";
+      .trim() || "resident";
 
   const isStaff =
     userRole === "staff" ||
@@ -761,25 +540,41 @@ export default function ReportDetailsPage() {
   const isAdmin =
     userRole === "admin";
 
-  useEffect(() => {
-    if (
-      isStaff
-    ) {
-      loadStaffMembers();
+  const isAssignedToMe =
+    !!user &&
+    !!report &&
+    report.assignedTo ===
+      user.uid;
 
-      loadCaseNotes();
+  const canManageCase =
+    isAdmin ||
+    (userRole === "staff" &&
+      isAssignedToMe);
+
+  useEffect(() => {
+    if (isAdmin) {
+      loadStaffMembers();
     }
   }, [
-    isStaff,
+    isAdmin,
+    profile?.organizationId,
+    reportId,
+  ]);
+
+  useEffect(() => {
+    if (canManageCase) {
+      loadCaseNotes();
+    } else {
+      setCaseNotes([]);
+    }
+  }, [
+    canManageCase,
     reportId,
   ]);
 
   async function handleConfirm() {
     if (!user) {
-      router.push(
-        "/login"
-      );
-
+      router.push("/login");
       return;
     }
 
@@ -794,7 +589,6 @@ export default function ReportDetailsPage() {
       setError(
         "You cannot confirm your own report."
       );
-
       return;
     }
 
@@ -806,7 +600,6 @@ export default function ReportDetailsPage() {
       setError(
         "You have already confirmed this report."
       );
-
       return;
     }
 
@@ -815,12 +608,11 @@ export default function ReportDetailsPage() {
       setError("");
       setSuccess("");
 
-      const reportRef =
-        doc(
-          db,
-          "reports",
-          reportId
-        );
+      const reportRef = doc(
+        db,
+        "reports",
+        reportId
+      );
 
       await updateDoc(
         reportRef,
@@ -838,9 +630,6 @@ export default function ReportDetailsPage() {
         }
       );
 
-      /*
-       * Notify the report creator.
-       */
       if (
         report.createdBy !==
         user.uid
@@ -891,15 +680,13 @@ export default function ReportDetailsPage() {
       setError(
         "You must be logged in."
       );
-
       return;
     }
 
-    if (!isStaff) {
+    if (!canManageCase) {
       setError(
-        "You do not have permission to update report statuses."
+        "You do not have permission to update this case."
       );
-
       return;
     }
 
@@ -916,7 +703,6 @@ export default function ReportDetailsPage() {
           newStatus
         )}.`
       );
-
       return;
     }
 
@@ -925,12 +711,11 @@ export default function ReportDetailsPage() {
       setError("");
       setSuccess("");
 
-      const reportRef =
-        doc(
-          db,
-          "reports",
-          reportId
-        );
+      const reportRef = doc(
+        db,
+        "reports",
+        reportId
+      );
 
       await updateDoc(
         reportRef,
@@ -955,9 +740,6 @@ export default function ReportDetailsPage() {
         }
       );
 
-      /*
-       * Notify the person who submitted the report.
-       */
       if (
         report.createdBy !==
         user.uid
@@ -1010,15 +792,13 @@ export default function ReportDetailsPage() {
       setError(
         "You must be logged in."
       );
-
       return;
     }
 
-    if (!isStaff) {
+    if (!isAdmin) {
       setError(
-        "You do not have permission to assign reports."
+        "Only administrators can assign or reassign cases."
       );
-
       return;
     }
 
@@ -1026,7 +806,6 @@ export default function ReportDetailsPage() {
       setError(
         "Report data is not available."
       );
-
       return;
     }
 
@@ -1036,15 +815,12 @@ export default function ReportDetailsPage() {
       setError(
         "Please choose a staff member."
       );
-
       return;
     }
 
     const selectedMember =
       staffMembers.find(
-        (
-          member
-        ) =>
+        (member) =>
           member.uid ===
           selectedStaffId
       );
@@ -1055,7 +831,16 @@ export default function ReportDetailsPage() {
       setError(
         "Selected staff member could not be found."
       );
+      return;
+    }
 
+    if (
+      selectedMember.organizationId !==
+      report.organizationId
+    ) {
+      setError(
+        "The selected staff member does not belong to this organisation."
+      );
       return;
     }
 
@@ -1064,16 +849,14 @@ export default function ReportDetailsPage() {
       setError("");
       setSuccess("");
 
-      const reportRef =
-        doc(
-          db,
-          "reports",
-          reportId
-        );
+      const reportRef = doc(
+        db,
+        "reports",
+        reportId
+      );
 
       const assigneeName =
         selectedMember.name?.trim() ||
-        selectedMember.email ||
         "Staff Member";
 
       const updateData: Record<
@@ -1118,9 +901,6 @@ export default function ReportDetailsPage() {
         updateData
       );
 
-      /*
-       * Notify the staff member.
-       */
       if (
         selectedStaffId !==
         user.uid
@@ -1145,9 +925,6 @@ export default function ReportDetailsPage() {
         });
       }
 
-      /*
-       * Notify the resident who created the report.
-       */
       if (
         report.createdBy !==
         user.uid
@@ -1196,11 +973,10 @@ export default function ReportDetailsPage() {
       return;
     }
 
-    if (!isStaff) {
+    if (!isAdmin) {
       setError(
-        "You do not have permission to unassign reports."
+        "Only administrators can remove case assignments."
       );
-
       return;
     }
 
@@ -1209,12 +985,11 @@ export default function ReportDetailsPage() {
       setError("");
       setSuccess("");
 
-      const reportRef =
-        doc(
-          db,
-          "reports",
-          reportId
-        );
+      const reportRef = doc(
+        db,
+        "reports",
+        reportId
+      );
 
       await updateDoc(
         reportRef,
@@ -1233,10 +1008,7 @@ export default function ReportDetailsPage() {
         }
       );
 
-      setSelectedStaffId(
-        ""
-      );
-
+      setSelectedStaffId("");
       setSuccess(
         "Report assignment removed."
       );
@@ -1261,28 +1033,23 @@ export default function ReportDetailsPage() {
       setError(
         "You must be logged in."
       );
-
       return;
     }
 
-    if (!isStaff) {
+    if (!canManageCase) {
       setError(
-        "You do not have permission to add case notes."
+        "You do not have permission to add notes to this case."
       );
-
       return;
     }
 
     const trimmedNote =
       newNote.trim();
 
-    if (
-      !trimmedNote
-    ) {
+    if (!trimmedNote) {
       setError(
         "Please write a case note first."
       );
-
       return;
     }
 
@@ -1293,7 +1060,6 @@ export default function ReportDetailsPage() {
       setError(
         "Case notes cannot exceed 2000 characters."
       );
-
       return;
     }
 
@@ -1304,8 +1070,6 @@ export default function ReportDetailsPage() {
 
       const authorName =
         profile?.name?.trim() ||
-        profile?.email ||
-        user.email ||
         "Staff Member";
 
       await addDoc(
@@ -1331,7 +1095,6 @@ export default function ReportDetailsPage() {
       );
 
       setNewNote("");
-
       setSuccess(
         "Internal case note added."
       );
@@ -1353,10 +1116,7 @@ export default function ReportDetailsPage() {
 
   async function handleAddComment() {
     if (!user) {
-      router.push(
-        "/login"
-      );
-
+      router.push("/login");
       return;
     }
 
@@ -1367,13 +1127,10 @@ export default function ReportDetailsPage() {
     const trimmedComment =
       newComment.trim();
 
-    if (
-      !trimmedComment
-    ) {
+    if (!trimmedComment) {
       setError(
         "Please write a comment first."
       );
-
       return;
     }
 
@@ -1384,7 +1141,6 @@ export default function ReportDetailsPage() {
       setError(
         "Comments cannot exceed 1000 characters."
       );
-
       return;
     }
 
@@ -1395,7 +1151,6 @@ export default function ReportDetailsPage() {
 
       const authorName =
         profile?.name?.trim() ||
-        user.email?.split("@")[0] ||
         "CivicPulse User";
 
       await addDoc(
@@ -1423,10 +1178,6 @@ export default function ReportDetailsPage() {
         }
       );
 
-      /*
-       * If someone other than the reporter comments,
-       * notify the person who submitted the report.
-       */
       if (
         report.createdBy !==
         user.uid
@@ -1452,7 +1203,6 @@ export default function ReportDetailsPage() {
       }
 
       setNewComment("");
-
       setSuccess(
         "Comment posted."
       );
@@ -1473,31 +1223,26 @@ export default function ReportDetailsPage() {
   }
 
   const sortedTimeline =
-    useMemo(
-      () => {
-        if (
-          report?.statusHistory &&
-          report.statusHistory.length >
-            0
-        ) {
-          return report.statusHistory;
-        }
+    useMemo(() => {
+      if (
+        report?.statusHistory &&
+        report.statusHistory.length >
+          0
+      ) {
+        return report.statusHistory;
+      }
 
-        return [
-          {
-            status:
-              report?.status ||
-              "submitted",
+      return [
+        {
+          status:
+            report?.status ||
+            "submitted",
 
-            changedAt:
-              report?.createdAt,
-          },
-        ];
-      },
-      [
-        report,
-      ]
-    );
+          changedAt:
+            report?.createdAt,
+        },
+      ];
+    }, [report]);
 
   if (
     loading ||
@@ -1556,11 +1301,6 @@ export default function ReportDetailsPage() {
     currentReport.createdBy ===
       user.uid;
 
-  const isAssignedToMe =
-    !!user &&
-    currentReport.assignedTo ===
-      user.uid;
-
   function renderStatusButton(
     status: string,
     label: string
@@ -1613,7 +1353,9 @@ export default function ReportDetailsPage() {
 
             {isStaff && (
               <span className="rounded-full border border-blue-800 bg-blue-950/50 px-4 py-2 text-sm font-semibold text-blue-300">
-                Staff Mode
+                {isAdmin
+                  ? "Admin Mode"
+                  : "Staff Mode"}
               </span>
             )}
           </div>
@@ -1722,10 +1464,10 @@ export default function ReportDetailsPage() {
               </div>
             )}
 
-            {isStaff && (
+            {isAdmin && (
               <section className="mt-10 rounded-2xl border border-indigo-900 bg-indigo-950/20 p-6">
                 <p className="text-sm font-semibold uppercase tracking-wider text-indigo-400">
-                  Case Assignment
+                  Admin Assignment
                 </p>
 
                 <h2 className="mt-2 text-2xl font-bold">
@@ -1733,7 +1475,7 @@ export default function ReportDetailsPage() {
                 </h2>
 
                 <p className="mt-2 text-sm leading-6 text-gray-400">
-                  Choose the staff member responsible for handling this case.
+                  Only administrators can assign or reassign cases.
                 </p>
 
                 <div className="mt-5 flex flex-col gap-3 sm:flex-row">
@@ -1741,9 +1483,7 @@ export default function ReportDetailsPage() {
                     value={
                       selectedStaffId
                     }
-                    onChange={(
-                      event
-                    ) =>
+                    onChange={(event) =>
                       setSelectedStaffId(
                         event.target.value
                       )
@@ -1761,9 +1501,7 @@ export default function ReportDetailsPage() {
                     </option>
 
                     {staffMembers.map(
-                      (
-                        member
-                      ) => (
+                      (member) => (
                         <option
                           key={
                             member.uid
@@ -1773,7 +1511,6 @@ export default function ReportDetailsPage() {
                           }
                         >
                           {member.name ||
-                            member.email ||
                             "Staff Member"}
                           {" — "}
                           {member.role}
@@ -1819,17 +1556,23 @@ export default function ReportDetailsPage() {
               </section>
             )}
 
-            {isStaff && (
+            {canManageCase && (
               <section className="mt-6 rounded-2xl border border-blue-900 bg-blue-950/20 p-6">
                 <div className="flex flex-wrap items-start justify-between gap-4">
                   <div>
                     <p className="text-sm font-semibold uppercase tracking-wider text-blue-400">
-                      Staff Controls
+                      Case Controls
                     </p>
 
                     <h2 className="mt-2 text-2xl font-bold">
                       Manage report status
                     </h2>
+
+                    {!isAdmin && (
+                      <p className="mt-2 text-sm text-gray-400">
+                        You can update this case because it is assigned to you.
+                      </p>
+                    )}
                   </div>
 
                   <div className="rounded-xl bg-gray-900 px-4 py-3">
@@ -1887,7 +1630,7 @@ export default function ReportDetailsPage() {
               </section>
             )}
 
-            {isStaff && (
+            {canManageCase && (
               <section className="mt-6 rounded-2xl border border-emerald-900 bg-emerald-950/10 p-6">
                 <div className="flex flex-wrap items-start justify-between gap-4">
                   <div>
@@ -1913,16 +1656,12 @@ export default function ReportDetailsPage() {
                   value={
                     newNote
                   }
-                  onChange={(
-                    event
-                  ) =>
+                  onChange={(event) =>
                     setNewNote(
                       event.target.value
                     )
                   }
-                  maxLength={
-                    2000
-                  }
+                  maxLength={2000}
                   rows={4}
                   placeholder="Add an internal case note..."
                   className="mt-6 w-full resize-none rounded-xl border border-gray-700 bg-gray-950 px-4 py-3 outline-none focus:border-emerald-600"
@@ -1958,9 +1697,7 @@ export default function ReportDetailsPage() {
                     </p>
                   ) : (
                     caseNotes.map(
-                      (
-                        note
-                      ) => (
+                      (note) => (
                         <article
                           key={
                             note.id
@@ -2011,16 +1748,12 @@ export default function ReportDetailsPage() {
                     value={
                       newComment
                     }
-                    onChange={(
-                      event
-                    ) =>
+                    onChange={(event) =>
                       setNewComment(
                         event.target.value
                       )
                     }
-                    maxLength={
-                      1000
-                    }
+                    maxLength={1000}
                     rows={3}
                     placeholder="Add a public comment..."
                     className="w-full resize-none rounded-xl border border-gray-700 bg-gray-950 px-4 py-3 outline-none focus:border-purple-500"
@@ -2064,9 +1797,7 @@ export default function ReportDetailsPage() {
                   </div>
                 ) : (
                   publicComments.map(
-                    (
-                      comment
-                    ) => (
+                    (comment) => (
                       <article
                         key={
                           comment.id
@@ -2076,9 +1807,7 @@ export default function ReportDetailsPage() {
                         <div className="flex flex-wrap items-center gap-3">
                           <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-800 font-bold">
                             {comment.createdByName
-                              ?.charAt(
-                                0
-                              )
+                              ?.charAt(0)
                               .toUpperCase() ||
                               "C"}
                           </div>
@@ -2133,10 +1862,7 @@ export default function ReportDetailsPage() {
 
               <div className="mt-6">
                 {sortedTimeline.map(
-                  (
-                    item,
-                    index
-                  ) => {
+                  (item, index) => {
                     const isLast =
                       index ===
                       sortedTimeline.length -

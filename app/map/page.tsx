@@ -1,7 +1,24 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+
+import {
+  useRouter,
+} from "next/navigation";
+
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  query,
+  where,
+} from "firebase/firestore";
 
 import * as maplibregl from "maplibre-gl";
 import type { Map } from "maplibre-gl";
@@ -9,47 +26,72 @@ import type { Map } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 
 import {
-  collection,
-  getDocs,
-} from "firebase/firestore";
+  db,
+} from "@/src/lib/firebase";
 
-import { db } from "@/src/lib/firebase";
+import {
+  useAuth,
+} from "@/src/lib/AuthContext";
+
+type UserProfile = {
+  uid?: string;
+  name?: string;
+  email?: string;
+  role?: string;
+
+  organizationId?: string | null;
+  organizationName?: string | null;
+};
 
 type Report = {
   id: string;
+
   title: string;
+  description?: string;
+
   category: string;
   severity: string;
   status: string;
+
   latitude: number;
   longitude: number;
+
   confirmationCount?: number;
+
+  organizationId?: string | null;
+  organizationName?: string | null;
 };
 
-function getCategoryIcon(category: string) {
-  switch (category) {
-    case "Pothole":
+function getCategoryEmoji(
+  category: string
+) {
+  switch (
+    category
+      .toLowerCase()
+      .trim()
+  ) {
+    case "pothole":
       return "🕳️";
 
-    case "Water Leak":
+    case "water leak":
       return "💧";
 
-    case "Power Outage":
+    case "power outage":
       return "⚡";
 
-    case "Broken Streetlight":
+    case "broken streetlight":
       return "💡";
 
-    case "Illegal Dumping":
+    case "illegal dumping":
       return "⚠️";
 
-    case "Road Hazard":
+    case "road hazard":
       return "🚧";
 
-    case "Sewer Issue":
+    case "sewer issue":
       return "☣️";
 
-    case "Vandalism":
+    case "vandalism":
       return "🧱";
 
     default:
@@ -57,8 +99,14 @@ function getCategoryIcon(category: string) {
   }
 }
 
-function getSeverityColor(severity: string) {
-  switch (severity) {
+function getSeverityColor(
+  severity: string
+) {
+  switch (
+    severity
+      .toLowerCase()
+      .trim()
+  ) {
     case "critical":
       return "#dc2626";
 
@@ -76,167 +124,298 @@ function getSeverityColor(severity: string) {
   }
 }
 
-export default function MapPage() {
-  const router = useRouter();
+function getStatusLabel(
+  status: string
+) {
+  switch (status) {
+    case "submitted":
+      return "Submitted";
 
-  const mapContainer =
-    useRef<HTMLDivElement | null>(null);
+    case "acknowledged":
+      return "Acknowledged";
+
+    case "assigned":
+      return "Assigned";
+
+    case "in-progress":
+      return "In Progress";
+
+    case "resolved":
+      return "Resolved";
+
+    case "reopened":
+      return "Reopened";
+
+    case "verified":
+      return "Verified";
+
+    case "rejected":
+      return "Rejected";
+
+    case "duplicate":
+      return "Duplicate";
+
+    default:
+      return status;
+  }
+}
+
+export default function MapPage() {
+  const router =
+    useRouter();
+
+  const {
+    user,
+    loading: authLoading,
+  } = useAuth();
+
+  const mapContainerRef =
+    useRef<HTMLDivElement | null>(
+      null
+    );
 
   const mapRef =
-    useRef<Map | null>(null);
+    useRef<Map | null>(
+      null
+    );
+
+  const markersRef =
+    useRef<
+      maplibregl.Marker[]
+    >([]);
 
   const userMarkerRef =
-    useRef<maplibregl.Marker | null>(null);
+    useRef<maplibregl.Marker | null>(
+      null
+    );
 
-  const [reports, setReports] =
-    useState<Report[]>([]);
+  const [
+    profile,
+    setProfile,
+  ] =
+    useState<UserProfile | null>(
+      null
+    );
 
-  const [loading, setLoading] =
+  const [
+    reports,
+    setReports,
+  ] =
+    useState<Report[]>(
+      []
+    );
+
+  const [
+    loading,
+    setLoading,
+  ] =
     useState(true);
 
-  const [locationLoading, setLocationLoading] =
+  const [
+    mapReady,
+    setMapReady,
+  ] =
     useState(false);
 
-  const [locationFound, setLocationFound] =
+  const [
+    locating,
+    setLocating,
+  ] =
     useState(false);
 
-  const [error, setError] =
+  const [
+    search,
+    setSearch,
+  ] =
     useState("");
 
-  const [search, setSearch] =
+  const [
+    categoryFilter,
+    setCategoryFilter,
+  ] =
+    useState("all");
+
+  const [
+    severityFilter,
+    setSeverityFilter,
+  ] =
+    useState("all");
+
+  const [
+    statusFilter,
+    setStatusFilter,
+  ] =
+    useState("all");
+
+  const [
+    error,
+    setError,
+  ] =
     useState("");
 
-  const [categoryFilter, setCategoryFilter] =
-    useState("all");
-
-  const [severityFilter, setSeverityFilter] =
-    useState("all");
-
-  const [statusFilter, setStatusFilter] =
-    useState("all");
-
-  // ----------------------------------
-  // LOAD REPORTS
-  // ----------------------------------
-
-  useEffect(() => {
-    async function loadReports() {
-      try {
-        setLoading(true);
-        setError("");
-
-        const snapshot =
-          await getDocs(
-            collection(db, "reports")
-          );
-
-        const loadedReports: Report[] =
-          snapshot.docs
-            .map((document) => ({
-              id: document.id,
-
-              ...(document.data() as Omit<
-                Report,
-                "id"
-              >),
-            }))
-            .filter(
-              (report) =>
-                typeof report.latitude === "number" &&
-                typeof report.longitude === "number"
-            );
-
-        setReports(loadedReports);
-      } catch (err) {
-        console.error(
-          "Map report error:",
-          err
-        );
-
-        setError(
-          "Failed to load community reports."
-        );
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    loadReports();
-  }, []);
-
-  // ----------------------------------
-  // FILTER REPORTS
-  // ----------------------------------
-
-  const filteredReports =
-    useMemo(() => {
-      return reports.filter((report) => {
-        const matchesSearch =
-          report.title
-            .toLowerCase()
-            .includes(
-              search.toLowerCase()
-            );
-
-        const matchesCategory =
-          categoryFilter === "all" ||
-          report.category === categoryFilter;
-
-        const matchesSeverity =
-          severityFilter === "all" ||
-          report.severity === severityFilter;
-
-        const matchesStatus =
-          statusFilter === "all" ||
-          report.status === statusFilter;
-
-        return (
-          matchesSearch &&
-          matchesCategory &&
-          matchesSeverity &&
-          matchesStatus
-        );
-      });
-    }, [
-      reports,
-      search,
-      categoryFilter,
-      severityFilter,
-      statusFilter,
-    ]);
-
-  // ----------------------------------
-  // CREATE MAP
-  // ----------------------------------
-
-  useEffect(() => {
-    if (!mapContainer.current) {
+  async function loadData() {
+    if (!user) {
       return;
     }
 
-    if (mapRef.current) {
+    const currentUser =
+      user;
+
+    try {
+      setLoading(true);
+      setError("");
+
+      const userRef =
+        doc(
+          db,
+          "users",
+          currentUser.uid
+        );
+
+      const userSnapshot =
+        await getDoc(
+          userRef
+        );
+
+      if (
+        !userSnapshot.exists()
+      ) {
+        setError(
+          "Your CivicPulse profile could not be found."
+        );
+
+        return;
+      }
+
+      const currentProfile =
+        userSnapshot.data() as UserProfile;
+
+      setProfile(
+        currentProfile
+      );
+
+      if (
+        !currentProfile.organizationId
+      ) {
+        setReports([]);
+
+        return;
+      }
+
+      const reportsQuery =
+        query(
+          collection(
+            db,
+            "reports"
+          ),
+          where(
+            "organizationId",
+            "==",
+            currentProfile.organizationId
+          )
+        );
+
+      const snapshot =
+        await getDocs(
+          reportsQuery
+        );
+
+      const organizationReports: Report[] =
+        snapshot.docs
+          .map(
+            (
+              reportDoc
+            ) => ({
+              id:
+                reportDoc.id,
+
+              ...(reportDoc.data() as Omit<
+                Report,
+                "id"
+              >),
+            })
+          )
+          .filter(
+            (
+              report
+            ) =>
+              typeof report.latitude ===
+                "number" &&
+              typeof report.longitude ===
+                "number"
+          );
+
+      setReports(
+        organizationReports
+      );
+    } catch (err) {
+      console.error(
+        "Map load error:",
+        err
+      );
+
+      setError(
+        "Unable to load organisation reports."
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (
+      authLoading
+    ) {
+      return;
+    }
+
+    if (!user) {
+      router.replace(
+        "/login"
+      );
+
+      return;
+    }
+
+    loadData();
+  }, [
+    user,
+    authLoading,
+  ]);
+
+  useEffect(() => {
+    if (
+      loading ||
+      !profile?.organizationId ||
+      !mapContainerRef.current ||
+      mapRef.current
+    ) {
       return;
     }
 
     const map =
       new maplibregl.Map({
         container:
-          mapContainer.current,
+          mapContainerRef.current,
 
         style: {
-          version: 8,
+          version:
+            8,
 
           sources: {
             osm: {
-              type: "raster",
+              type:
+                "raster",
 
               tiles: [
                 "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
               ],
 
-              tileSize: 256,
+              tileSize:
+                256,
 
-              maxzoom: 19,
+              maxzoom:
+                19,
 
               attribution:
                 "© OpenStreetMap contributors",
@@ -245,9 +424,14 @@ export default function MapPage() {
 
           layers: [
             {
-              id: "osm",
-              type: "raster",
-              source: "osm",
+              id:
+                "osm",
+
+              type:
+                "raster",
+
+              source:
+                "osm",
             },
           ],
         },
@@ -257,9 +441,11 @@ export default function MapPage() {
           -26.2041,
         ],
 
-        zoom: 11,
+        zoom:
+          11,
 
-        maxZoom: 19,
+        maxZoom:
+          19,
       });
 
     map.addControl(
@@ -267,34 +453,187 @@ export default function MapPage() {
       "top-right"
     );
 
-    mapRef.current = map;
+    map.on(
+      "load",
+      () => {
+        setMapReady(
+          true
+        );
+      }
+    );
+
+    mapRef.current =
+      map;
 
     return () => {
-      userMarkerRef.current?.remove();
+      markersRef.current.forEach(
+        (
+          marker
+        ) =>
+          marker.remove()
+      );
+
+      markersRef.current =
+        [];
+
+      if (
+        userMarkerRef.current
+      ) {
+        userMarkerRef.current.remove();
+
+        userMarkerRef.current =
+          null;
+      }
 
       map.remove();
 
-      mapRef.current = null;
-    };
-  }, []);
+      mapRef.current =
+        null;
 
-  // ----------------------------------
-  // REPORT MARKERS
-  // ----------------------------------
+      setMapReady(
+        false
+      );
+    };
+  }, [
+    loading,
+    profile?.organizationId,
+  ]);
+
+  const categories =
+    useMemo(
+      () =>
+        Array.from(
+          new Set(
+            reports
+              .map(
+                (
+                  report
+                ) =>
+                  report.category
+              )
+              .filter(
+                Boolean
+              )
+          )
+        ).sort(),
+
+      [
+        reports,
+      ]
+    );
+
+  const filteredReports =
+    useMemo(
+      () => {
+        const normalizedSearch =
+          search
+            .trim()
+            .toLowerCase();
+
+        return reports.filter(
+          (
+            report
+          ) => {
+            if (
+              categoryFilter !==
+                "all" &&
+              report.category !==
+                categoryFilter
+            ) {
+              return false;
+            }
+
+            if (
+              severityFilter !==
+                "all" &&
+              report.severity !==
+                severityFilter
+            ) {
+              return false;
+            }
+
+            if (
+              statusFilter !==
+                "all" &&
+              report.status !==
+                statusFilter
+            ) {
+              return false;
+            }
+
+            if (
+              !normalizedSearch
+            ) {
+              return true;
+            }
+
+            const haystack =
+              [
+                report.title,
+                report.description,
+                report.category,
+                report.severity,
+                report.status,
+              ]
+                .filter(
+                  Boolean
+                )
+                .join(
+                  " "
+                )
+                .toLowerCase();
+
+            return haystack.includes(
+              normalizedSearch
+            );
+          }
+        );
+      },
+
+      [
+        reports,
+        search,
+        categoryFilter,
+        severityFilter,
+        statusFilter,
+      ]
+    );
 
   useEffect(() => {
     const map =
       mapRef.current;
 
-    if (!map) {
+    if (
+      !map ||
+      !mapReady
+    ) {
       return;
     }
 
-    const markers:
-      maplibregl.Marker[] = [];
+    markersRef.current.forEach(
+      (
+        marker
+      ) =>
+        marker.remove()
+    );
+
+    markersRef.current =
+      [];
+
+    if (
+      filteredReports.length ===
+      0
+    ) {
+      return;
+    }
+
+    const bounds =
+      new maplibregl.LngLatBounds();
 
     filteredReports.forEach(
-      (report) => {
+      (
+        report
+      ) => {
         const markerElement =
           document.createElement(
             "div"
@@ -307,7 +646,7 @@ export default function MapPage() {
           "48px";
 
         markerElement.style.borderRadius =
-          "50%";
+          "9999px";
 
         markerElement.style.display =
           "flex";
@@ -339,12 +678,9 @@ export default function MapPage() {
           "transform 0.15s ease";
 
         markerElement.textContent =
-          getCategoryIcon(
+          getCategoryEmoji(
             report.category
           );
-
-        markerElement.title =
-          `${report.category}: ${report.title}`;
 
         markerElement.addEventListener(
           "mouseenter",
@@ -362,10 +698,6 @@ export default function MapPage() {
           }
         );
 
-        // ----------------------------
-        // POPUP
-        // ----------------------------
-
         const popupContainer =
           document.createElement(
             "div"
@@ -377,119 +709,107 @@ export default function MapPage() {
         popupContainer.style.color =
           "#111827";
 
-        const title =
+        const titleElement =
           document.createElement(
-            "strong"
+            "h3"
           );
 
-        title.textContent =
+        titleElement.textContent =
           report.title;
 
-        title.style.fontSize =
+        titleElement.style.fontWeight =
+          "700";
+
+        titleElement.style.fontSize =
           "16px";
 
-        popupContainer.appendChild(
-          title
-        );
+        titleElement.style.marginBottom =
+          "8px";
 
-        const category =
+        const categoryElement =
           document.createElement(
-            "div"
+            "p"
           );
 
-        category.textContent =
-          `${getCategoryIcon(
+        categoryElement.textContent =
+          `${getCategoryEmoji(
             report.category
           )} ${report.category}`;
 
-        category.style.marginTop =
-          "8px";
+        categoryElement.style.marginBottom =
+          "4px";
 
-        popupContainer.appendChild(
-          category
-        );
-
-        const severity =
+        const severityElement =
           document.createElement(
-            "div"
+            "p"
           );
 
-        severity.textContent =
+        severityElement.textContent =
           `Severity: ${report.severity}`;
 
-        severity.style.marginTop =
-          "5px";
+        severityElement.style.textTransform =
+          "capitalize";
 
-        popupContainer.appendChild(
-          severity
-        );
+        severityElement.style.marginBottom =
+          "4px";
 
-        const status =
+        const statusElement =
           document.createElement(
-            "div"
+            "p"
           );
 
-        status.textContent =
-          `Status: ${report.status}`;
+        statusElement.textContent =
+          `Status: ${getStatusLabel(
+            report.status
+          )}`;
 
-        status.style.marginTop =
-          "5px";
+        statusElement.style.marginBottom =
+          "4px";
 
-        popupContainer.appendChild(
-          status
-        );
-
-        const confirmations =
+        const confirmationElement =
           document.createElement(
-            "div"
+            "p"
           );
 
-        confirmations.textContent =
-          `${
+        confirmationElement.textContent =
+          `Confirmations: ${
             report.confirmationCount ??
             0
-          } confirmations`;
+          }`;
 
-        confirmations.style.marginTop =
-          "5px";
+        confirmationElement.style.marginBottom =
+          "10px";
 
-        popupContainer.appendChild(
-          confirmations
-        );
-
-        const button =
+        const linkButton =
           document.createElement(
             "button"
           );
 
-        button.textContent =
+        linkButton.textContent =
           "View Report";
 
-        button.style.marginTop =
-          "12px";
+        linkButton.style.width =
+          "100%";
 
-        button.style.padding =
+        linkButton.style.padding =
           "8px 12px";
 
-        button.style.background =
+        linkButton.style.borderRadius =
+          "8px";
+
+        linkButton.style.background =
           "#2563eb";
 
-        button.style.color =
+        linkButton.style.color =
           "white";
 
-        button.style.border =
-          "none";
-
-        button.style.borderRadius =
-          "7px";
-
-        button.style.cursor =
-          "pointer";
-
-        button.style.fontWeight =
+        linkButton.style.fontWeight =
           "600";
 
-        button.addEventListener(
+        linkButton.style.cursor =
+          "pointer";
+
+        linkButton.addEventListener(
           "click",
           () => {
             router.push(
@@ -499,12 +819,33 @@ export default function MapPage() {
         );
 
         popupContainer.appendChild(
-          button
+          titleElement
+        );
+
+        popupContainer.appendChild(
+          categoryElement
+        );
+
+        popupContainer.appendChild(
+          severityElement
+        );
+
+        popupContainer.appendChild(
+          statusElement
+        );
+
+        popupContainer.appendChild(
+          confirmationElement
+        );
+
+        popupContainer.appendChild(
+          linkButton
         );
 
         const popup =
           new maplibregl.Popup({
-            offset: 30,
+            offset:
+              28,
           }).setDOMContent(
             popupContainer
           );
@@ -518,103 +859,105 @@ export default function MapPage() {
               report.longitude,
               report.latitude,
             ])
-            .setPopup(popup)
-            .addTo(map);
+            .setPopup(
+              popup
+            )
+            .addTo(
+              map
+            );
 
-        markers.push(marker);
+        markersRef.current.push(
+          marker
+        );
+
+        bounds.extend([
+          report.longitude,
+          report.latitude,
+        ]);
       }
     );
 
-    // AUTO CENTER REPORTS
-
     if (
-      filteredReports.length === 1
+      filteredReports.length ===
+      1
     ) {
-      const report =
+      const first =
         filteredReports[0];
 
       map.flyTo({
         center: [
-          report.longitude,
-          report.latitude,
+          first.longitude,
+          first.latitude,
         ],
 
-        zoom: 15,
-
-        essential: true,
+        zoom:
+          15,
       });
-    }
 
-    if (
-      filteredReports.length > 1
-    ) {
-      const bounds =
-        new maplibregl.LngLatBounds();
-
-      filteredReports.forEach(
-        (report) => {
-          bounds.extend([
-            report.longitude,
-            report.latitude,
-          ]);
-        }
-      );
-
-      map.fitBounds(
-        bounds,
-        {
-          padding: 80,
-          maxZoom: 15,
-          duration: 1000,
-        }
-      );
-    }
-
-    return () => {
-      markers.forEach(
-        (marker) =>
-          marker.remove()
-      );
-    };
-  }, [
-    filteredReports,
-    router,
-  ]);
-
-  // ----------------------------------
-  // FIND USER LOCATION
-  // ----------------------------------
-
-  function findMyLocation() {
-    const map =
-      mapRef.current;
-
-    if (!map) {
       return;
     }
 
+    map.fitBounds(
+      bounds,
+      {
+        padding:
+          80,
+
+        maxZoom:
+          15,
+
+        duration:
+          800,
+      }
+    );
+  }, [
+    filteredReports,
+    mapReady,
+    router,
+  ]);
+
+  function handleFindMyLocation() {
     if (
       !navigator.geolocation
     ) {
       setError(
-        "Your browser does not support location services."
+        "Geolocation is not supported by your browser."
       );
 
       return;
     }
 
-    setLocationLoading(true);
+    setLocating(true);
     setError("");
 
     navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const longitude =
-          position.coords.longitude;
-
+      (
+        position
+      ) => {
         const latitude =
           position.coords.latitude;
 
-        userMarkerRef.current?.remove();
+        const longitude =
+          position.coords.longitude;
+
+        const map =
+          mapRef.current;
+
+        if (
+          !map
+        ) {
+          setLocating(
+            false
+          );
+
+          return;
+        }
+
+        if (
+          userMarkerRef.current
+        ) {
+          userMarkerRef.current.remove();
+        }
 
         const markerElement =
           document.createElement(
@@ -628,7 +971,7 @@ export default function MapPage() {
           "22px";
 
         markerElement.style.borderRadius =
-          "50%";
+          "9999px";
 
         markerElement.style.background =
           "#3b82f6";
@@ -637,12 +980,9 @@ export default function MapPage() {
           "4px solid white";
 
         markerElement.style.boxShadow =
-          "0 0 0 5px rgba(59,130,246,0.25)";
+          "0 0 0 4px rgba(59,130,246,0.25)";
 
-        markerElement.title =
-          "Your location";
-
-        userMarkerRef.current =
+        const marker =
           new maplibregl.Marker({
             element:
               markerElement,
@@ -651,14 +991,12 @@ export default function MapPage() {
               longitude,
               latitude,
             ])
-            .setPopup(
-              new maplibregl.Popup({
-                offset: 20,
-              }).setText(
-                "You are here"
-              )
-            )
-            .addTo(map);
+            .addTo(
+              map
+            );
+
+        userMarkerRef.current =
+          marker;
 
         map.flyTo({
           center: [
@@ -666,35 +1004,30 @@ export default function MapPage() {
             latitude,
           ],
 
-          zoom: 15,
-
-          essential: true,
+          zoom:
+            15,
         });
 
-        setLocationFound(true);
-        setLocationLoading(false);
+        setLocating(
+          false
+        );
       },
 
-      (locationError) => {
+      (
+        geolocationError
+      ) => {
         console.error(
           "Location error:",
-          locationError
+          geolocationError
         );
 
-        if (
-          locationError.code ===
-          locationError.PERMISSION_DENIED
-        ) {
-          setError(
-            "Location permission was denied. Please allow location access."
-          );
-        } else {
-          setError(
-            "We could not determine your location."
-          );
-        }
+        setError(
+          "Unable to get your current location."
+        );
 
-        setLocationLoading(false);
+        setLocating(
+          false
+        );
       },
 
       {
@@ -703,185 +1036,247 @@ export default function MapPage() {
 
         timeout:
           15000,
-
-        maximumAge:
-          30000,
       }
     );
   }
 
-  // ----------------------------------
-  // CLEAR FILTERS
-  // ----------------------------------
-
   function clearFilters() {
     setSearch("");
-    setCategoryFilter("all");
-    setSeverityFilter("all");
-    setStatusFilter("all");
+
+    setCategoryFilter(
+      "all"
+    );
+
+    setSeverityFilter(
+      "all"
+    );
+
+    setStatusFilter(
+      "all"
+    );
   }
+
+  if (
+    authLoading ||
+    loading
+  ) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-gray-950 text-white">
+        <div className="text-center">
+          <div className="mx-auto h-10 w-10 animate-spin rounded-full border-4 border-gray-700 border-t-orange-500" />
+
+          <p className="mt-4 text-gray-400">
+            Loading community map...
+          </p>
+        </div>
+      </main>
+    );
+  }
+
+  if (!user) {
+    return null;
+  }
+
+  if (
+    !profile?.organizationId
+  ) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-gray-950 p-6 text-white">
+        <div className="w-full max-w-lg rounded-2xl border border-gray-800 bg-gray-900 p-8 text-center">
+          <div className="text-5xl">
+            🏢
+          </div>
+
+          <h1 className="mt-5 text-3xl font-bold">
+            No Organisation
+          </h1>
+
+          <p className="mt-3 leading-7 text-gray-400">
+            Your account must belong to an organisation before you can access its community map.
+          </p>
+
+          <button
+            type="button"
+            onClick={() =>
+              router.push(
+                "/dashboard"
+              )
+            }
+            className="mt-6 rounded-lg bg-blue-600 px-6 py-3 font-semibold hover:bg-blue-500"
+          >
+            Dashboard
+          </button>
+        </div>
+      </main>
+    );
+  }
+
+  const filtersActive =
+    !!search ||
+    categoryFilter !==
+      "all" ||
+    severityFilter !==
+      "all" ||
+    statusFilter !==
+      "all";
 
   return (
     <main className="min-h-screen bg-gray-950 text-white">
+      <div className="mx-auto max-w-7xl p-6 lg:p-8">
+        <header className="flex flex-col gap-5 border-b border-gray-800 pb-7 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-orange-400">
+              Community Map
+            </p>
 
-      {/* HEADER */}
+            <h1 className="mt-2 text-3xl font-bold sm:text-4xl">
+              {
+                profile.organizationName ||
+                "CivicPulse"
+              }
+            </h1>
 
-      <div className="border-b border-gray-800 bg-gray-900 p-5">
-
-        <div className="mx-auto max-w-7xl">
-
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-
-            <div>
-              <h1 className="text-2xl font-bold">
-                CivicPulse Map
-              </h1>
-
-              <p className="text-sm text-gray-400">
-                Explore issues reported across your community.
-              </p>
-            </div>
-
-            <div className="flex flex-wrap gap-3">
-
-              <button
-                onClick={
-                  findMyLocation
-                }
-                disabled={
-                  locationLoading
-                }
-                className="rounded-lg bg-green-600 px-4 py-2 font-semibold hover:bg-green-500 disabled:opacity-50"
-              >
-                {locationLoading
-                  ? "Finding you..."
-                  : locationFound
-                  ? "📍 My Location"
-                  : "◎ Find My Location"}
-              </button>
-
-              <button
-                onClick={() =>
-                  router.push(
-                    "/dashboard"
-                  )
-                }
-                className="rounded-lg border border-gray-700 px-4 py-2 hover:bg-gray-800"
-              >
-                Dashboard
-              </button>
-
-              <button
-                onClick={() =>
-                  router.push(
-                    "/report/new"
-                  )
-                }
-                className="rounded-lg bg-blue-600 px-4 py-2 font-semibold hover:bg-blue-500"
-              >
-                Report Issue
-              </button>
-
-            </div>
+            <p className="mt-2 text-gray-400">
+              Explore reported issues across your organisation.
+            </p>
           </div>
 
-          {/* FILTERS */}
+          <div className="flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={
+                handleFindMyLocation
+              }
+              disabled={
+                locating
+              }
+              className="rounded-lg border border-blue-800 bg-blue-950/30 px-4 py-3 font-semibold text-blue-300 hover:bg-blue-950 disabled:opacity-50"
+            >
+              {locating
+                ? "Locating..."
+                : "📍 Find My Location"}
+            </button>
 
-          <div className="mt-5 grid gap-3 md:grid-cols-5">
-
-            <input
-              type="text"
-              placeholder="Search reports..."
-              value={search}
-              onChange={(e) =>
-                setSearch(
-                  e.target.value
+            <button
+              type="button"
+              onClick={() =>
+                router.push(
+                  "/report/new"
                 )
               }
-              className="rounded-lg border border-gray-700 bg-gray-800 px-4 py-2 outline-none"
+              className="rounded-lg border border-gray-700 bg-gray-900 px-4 py-3 font-semibold hover:bg-gray-800"
+            >
+              + Report Issue
+            </button>
+
+            <button
+              type="button"
+              onClick={() =>
+                router.push(
+                  "/dashboard"
+                )
+              }
+              className="rounded-lg bg-blue-600 px-4 py-3 font-semibold hover:bg-blue-500"
+            >
+              Dashboard
+            </button>
+          </div>
+        </header>
+
+        {error && (
+          <div className="mt-6 rounded-xl border border-red-900 bg-red-950/30 p-4 text-red-300">
+            {
+              error
+            }
+          </div>
+        )}
+
+        <section className="mt-6 rounded-2xl border border-gray-800 bg-gray-900 p-5">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <input
+              type="text"
+              value={
+                search
+              }
+              onChange={(
+                event
+              ) =>
+                setSearch(
+                  event.target.value
+                )
+              }
+              placeholder="Search map..."
+              className="rounded-xl border border-gray-700 bg-gray-950 px-4 py-3 outline-none placeholder:text-gray-600 focus:border-orange-500"
             />
 
             <select
               value={
                 categoryFilter
               }
-              onChange={(e) =>
+              onChange={(
+                event
+              ) =>
                 setCategoryFilter(
-                  e.target.value
+                  event.target.value
                 )
               }
-              className="rounded-lg border border-gray-700 bg-gray-800 px-4 py-2"
+              className="rounded-xl border border-gray-700 bg-gray-950 px-4 py-3 outline-none"
             >
               <option value="all">
-                All categories
+                All Categories
               </option>
 
-              <option value="Pothole">
-                Pothole
-              </option>
-
-              <option value="Water Leak">
-                Water Leak
-              </option>
-
-              <option value="Power Outage">
-                Power Outage
-              </option>
-
-              <option value="Broken Streetlight">
-                Broken Streetlight
-              </option>
-
-              <option value="Illegal Dumping">
-                Illegal Dumping
-              </option>
-
-              <option value="Road Hazard">
-                Road Hazard
-              </option>
-
-              <option value="Sewer Issue">
-                Sewer Issue
-              </option>
-
-              <option value="Vandalism">
-                Vandalism
-              </option>
-
-              <option value="Other">
-                Other
-              </option>
+              {categories.map(
+                (
+                  category
+                ) => (
+                  <option
+                    key={
+                      category
+                    }
+                    value={
+                      category
+                    }
+                  >
+                    {
+                      category
+                    }
+                  </option>
+                )
+              )}
             </select>
 
             <select
               value={
                 severityFilter
               }
-              onChange={(e) =>
+              onChange={(
+                event
+              ) =>
                 setSeverityFilter(
-                  e.target.value
+                  event.target.value
                 )
               }
-              className="rounded-lg border border-gray-700 bg-gray-800 px-4 py-2"
+              className="rounded-xl border border-gray-700 bg-gray-950 px-4 py-3 outline-none"
             >
               <option value="all">
-                All severities
+                All Severities
               </option>
 
-              <option value="low">
-                Low
-              </option>
-
-              <option value="medium">
-                Medium
+              <option value="critical">
+                Critical
               </option>
 
               <option value="high">
                 High
               </option>
 
-              <option value="critical">
-                Critical
+              <option value="medium">
+                Medium
+              </option>
+
+              <option value="low">
+                Low
               </option>
             </select>
 
@@ -889,23 +1284,21 @@ export default function MapPage() {
               value={
                 statusFilter
               }
-              onChange={(e) =>
+              onChange={(
+                event
+              ) =>
                 setStatusFilter(
-                  e.target.value
+                  event.target.value
                 )
               }
-              className="rounded-lg border border-gray-700 bg-gray-800 px-4 py-2"
+              className="rounded-xl border border-gray-700 bg-gray-950 px-4 py-3 outline-none"
             >
               <option value="all">
-                All statuses
+                All Statuses
               </option>
 
               <option value="submitted">
                 Submitted
-              </option>
-
-              <option value="verified">
-                Verified
               </option>
 
               <option value="acknowledged">
@@ -923,106 +1316,119 @@ export default function MapPage() {
               <option value="resolved">
                 Resolved
               </option>
+
+              <option value="reopened">
+                Reopened
+              </option>
             </select>
-
-            <button
-              onClick={
-                clearFilters
-              }
-              className="rounded-lg border border-gray-700 px-4 py-2 hover:bg-gray-800"
-            >
-              Clear Filters
-            </button>
-
           </div>
 
-          <p className="mt-3 text-sm text-gray-400">
-            Showing{" "}
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-gray-500">
+              Showing{" "}
+              <span className="font-semibold text-gray-300">
+                {
+                  filteredReports.length
+                }
+              </span>{" "}
+              of{" "}
+              <span className="font-semibold text-gray-300">
+                {
+                  reports.length
+                }
+              </span>{" "}
+              reports
+            </p>
 
-            <span className="font-semibold text-white">
-              {
-                filteredReports.length
-              }
-            </span>
+            {filtersActive && (
+              <button
+                type="button"
+                onClick={
+                  clearFilters
+                }
+                className="text-sm font-semibold text-orange-400 hover:text-orange-300"
+              >
+                Clear Filters
+              </button>
+            )}
+          </div>
+        </section>
 
-            {" "}of{" "}
+        <section className="mt-6 overflow-hidden rounded-2xl border border-gray-800 bg-gray-900">
+          <div
+            ref={
+              mapContainerRef
+            }
+            className="h-[65vh] min-h-[520px] w-full"
+          />
+        </section>
 
-            <span className="font-semibold text-white">
-              {
-                reports.length
-              }
-            </span>
-
-            {" "}reports
+        <section className="mt-6 rounded-2xl border border-gray-800 bg-gray-900 p-5">
+          <p className="text-sm font-semibold uppercase tracking-wider text-gray-400">
+            Map Legend
           </p>
 
-        </div>
+          <div className="mt-4 flex flex-wrap gap-4 text-sm text-gray-300">
+            <span>
+              🕳️ Pothole
+            </span>
+
+            <span>
+              💧 Water Leak
+            </span>
+
+            <span>
+              ⚡ Power Outage
+            </span>
+
+            <span>
+              💡 Streetlight
+            </span>
+
+            <span>
+              ⚠️ Dumping
+            </span>
+
+            <span>
+              🚧 Road Hazard
+            </span>
+
+            <span>
+              ☣️ Sewer
+            </span>
+
+            <span>
+              🧱 Vandalism
+            </span>
+
+            <span>
+              📍 Other
+            </span>
+          </div>
+
+          <div className="mt-5 flex flex-wrap gap-4 text-sm">
+            <span className="flex items-center gap-2">
+              <span className="h-3 w-3 rounded-full bg-red-600" />
+              Critical
+            </span>
+
+            <span className="flex items-center gap-2">
+              <span className="h-3 w-3 rounded-full bg-orange-600" />
+              High
+            </span>
+
+            <span className="flex items-center gap-2">
+              <span className="h-3 w-3 rounded-full bg-yellow-600" />
+              Medium
+            </span>
+
+            <span className="flex items-center gap-2">
+              <span className="h-3 w-3 rounded-full bg-green-600" />
+              Low
+            </span>
+          </div>
+        </section>
       </div>
-
-      {/* LEGEND */}
-
-      <div className="border-b border-gray-800 bg-gray-900/95 px-5 py-3">
-
-        <div className="mx-auto flex max-w-7xl flex-wrap gap-x-5 gap-y-2 text-sm text-gray-300">
-
-          <span>
-            🕳️ Pothole
-          </span>
-
-          <span>
-            💧 Water
-          </span>
-
-          <span>
-            ⚡ Electricity
-          </span>
-
-          <span>
-            💡 Streetlight
-          </span>
-
-          <span>
-            ⚠️ Dumping
-          </span>
-
-          <span>
-            🚧 Road Hazard
-          </span>
-
-          <span>
-            ☣️ Sewer
-          </span>
-
-          <span>
-            🧱 Vandalism
-          </span>
-
-        </div>
-      </div>
-
-      {/* ERROR */}
-
-      {error && (
-        <div className="border-b border-red-900 bg-red-950 p-4 text-center text-sm text-red-300">
-          {error}
-        </div>
-      )}
-
-      {/* LOADING */}
-
-      {loading && (
-        <div className="bg-gray-900 p-3 text-center text-sm text-gray-400">
-          Loading community reports...
-        </div>
-      )}
-
-      {/* MAP */}
-
-      <div
-        ref={mapContainer}
-        className="h-[calc(100vh-250px)] w-full"
-      />
-
     </main>
   );
 }
