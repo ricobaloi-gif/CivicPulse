@@ -16,6 +16,8 @@ interface ReportCardReport {
   confirmationCount?: number;
   assignedToName?: string | null;
   organizationName?: string | null;
+  areaName?: string | null;
+  ward?: string | null;
   escalationLevel?: number;
   createdAt?: { toDate(): Date } | Date | null;
 }
@@ -69,6 +71,9 @@ export function ReportCard({ report, showOrg = false }: ReportCardProps) {
             )}
             {showOrg && report.organizationName && (
               <span>🏢 {report.organizationName}</span>
+            )}
+            {(report.areaName || report.ward) && (
+              <span>📍 {report.areaName || report.ward}</span>
             )}
             {report.createdAt && (
               <span>{formatRelativeTime(report.createdAt as { toDate(): Date })}</span>

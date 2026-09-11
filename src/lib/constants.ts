@@ -380,8 +380,8 @@ export function encodeGeohash(
   longitude: number,
   precision: number = 7
 ): string {
-  let latRange = [-90.0, 90.0];
-  let lonRange = [-180.0, 180.0];
+  const latRange = [-90.0, 90.0];
+  const lonRange = [-180.0, 180.0];
   let hash = "";
   let bit = 0;
   let ch = 0;

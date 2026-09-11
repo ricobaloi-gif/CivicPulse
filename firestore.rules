@@ -1,0 +1,413 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ─── Helper Functions ────────────────────────────────────────────
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function getUserRole() {
+      return getUserData().role;
+    }
+
+    function getUserOrgId() {
+      return getUserData().organizationId;
+    }
+
+    function getUserOrgRole() {
+      return getUserData().organizationRole;
+    }
+
+    function isAdmin() {
+      return getUserRole() == 'admin';
+    }
+
+    function isStaff() {
+      return getUserRole() == 'staff' || getUserRole() == 'admin';
+    }
+
+    function isResident() {
+      return getUserRole() == 'resident';
+    }
+
+    function isOrgAdmin() {
+      return getUserOrgRole() == 'owner' || getUserOrgRole() == 'admin';
+    }
+
+    function isOrgStaff() {
+      return getUserOrgRole() == 'staff' || getUserOrgRole() == 'admin' || getUserOrgRole() == 'manager';
+    }
+
+    function isOrgMember() {
+      return getUserOrgRole() != null;
+    }
+
+    function sameOrg(resourceOrgId) {
+      return resourceOrgId == getUserOrgId();
+    }
+
+    function canManageOrg(resourceOrgId) {
+      return isAuthenticated() && isAdmin() && sameOrg(resourceOrgId);
+    }
+
+    function canManageOrgInvites(resourceOrgId) {
+      return isAuthenticated() && (isOrgAdmin() || isOrgStaff()) && sameOrg(resourceOrgId);
+    }
+
+    function canManageOrgAreas(resourceOrgId) {
+      return isAuthenticated() && (isOrgAdmin() || getUserOrgRole() == 'manager') && sameOrg(resourceOrgId);
+    }
+
+    function canManageOrgMembers(resourceOrgId) {
+      return isAuthenticated() && isOrgAdmin() && sameOrg(resourceOrgId);
+    }
+
+    function isReportCreator(report) {
+      return report.data.createdBy == request.auth.uid;
+    }
+
+    function isReportAssignedToMe(report) {
+      return report.data.assignedTo == request.auth.uid;
+    }
+
+    function canManageReport(report) {
+      return isAuthenticated() && (
+        (isAdmin() && sameOrg(report.data.organizationId)) ||
+        (getUserRole() == 'staff' && isReportAssignedToMe(report))
+      );
+    }
+
+    function canReadReport(report) {
+      return isAuthenticated() && (
+        isReportCreator(report) ||
+        (report.data.organizationId != null && sameOrg(report.data.organizationId) && (isStaff() || isOrgMember()))
+      );
+    }
+
+    function isSelfProfile(userId) {
+      return userId == request.auth.uid;
+    }
+
+    function protectedUserFields() {
+      return ['role', 'organizationId', 'organizationName', 'organizationRole', 'organizationJoinedAt', 'trustScore', 'platformRole'];
+    }
+
+    function hasOnlyAllowedUserUpdates(data, allowedFields) {
+      let changedFields = data.diff(resource.data).affectedKeys();
+      return changedFields.hasOnly(allowedFields);
+    }
+
+    // ─── Users Collection ────────────────────────────────────────────
+
+    match /users/{userId} {
+      // Users can read their own profile
+      allow read: if isAuthenticated() && isSelfProfile(userId);
+
+      // Users can read other profiles in same org (staff/admin only)
+      allow read: if isAuthenticated() &&
+        getUserOrgId() != null &&
+        resource.data.organizationId == getUserOrgId() &&
+        isStaff();
+
+      // Admins can read all profiles in their org
+      allow read: if isAuthenticated() && isAdmin() && sameOrg(resource.data.organizationId);
+
+      // Users can create their own profile on signup (handled by auth.ts)
+      allow create: if isAuthenticated() && isSelfProfile(userId) &&
+        request.resource.data.keys().hasOnly([
+          'uid', 'name', 'email', 'role', 'trustScore', 'createdAt',
+          'organizationId', 'organizationName', 'organizationRole', 'organizationJoinedAt',
+          'platformRole', 'phone', 'profilePhotoUrl'
+        ]) &&
+        request.resource.data.role == 'resident' &&
+        request.resource.data.trustScore == 50 &&
+        request.resource.data.organizationId == null &&
+        request.resource.data.organizationRole == null &&
+        request.resource.data.platformRole == null;
+
+      // Users can update their own profile (limited fields)
+      allow update: if isAuthenticated() && isSelfProfile(userId) &&
+        // Cannot modify protected fields
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['name', 'phone', 'profilePhotoUrl']);
+
+      // Staff/Admin can update other users in same org (role, orgRole, orgId, orgName, orgJoinedAt)
+      allow update: if isAuthenticated() &&
+        !isSelfProfile(userId) &&
+        resource.data.organizationId == getUserOrgId() &&
+        canManageOrgMembers(getUserOrgId()) &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['role', 'organizationRole', 'organizationId', 'organizationName', 'organizationJoinedAt']);
+
+      // Prevent deletion
+      allow delete: if false;
+    }
+
+    // ─── Reports Collection ──────────────────────────────────────────
+
+    match /reports/{reportId} {
+      // Residents can create reports in their org
+      allow create: if isAuthenticated() &&
+        request.resource.data.createdBy == request.auth.uid &&
+        request.resource.data.organizationId == getUserOrgId() &&
+        request.resource.data.keys().hasOnly([
+          'title', 'description', 'category', 'severity', 'status',
+          'latitude', 'longitude', 'geohash', 'address',
+          'areaId', 'areaName', 'ward', 'municipality',
+          'imageUrl',
+          'createdBy', 'createdByName',
+          'organizationId', 'organizationName',
+          'confirmationCount', 'confirmedBy',
+          'assignedTo', 'assignedToName', 'assignedAt',
+          'priority', 'escalationLevel', 'escalated', 'escalatedAt', 'escalatedBy', 'escalationReason',
+          'resolutionNote', 'resolvedAt', 'resolvedBy', 'resolutionImageUrls',
+          'disputeStatus', 'disputeReason', 'disputedAt', 'disputedBy',
+          'moderationStatus', 'moderationReason', 'moderatedBy', 'moderatedAt',
+          'submittedAt', 'acknowledgedAt', 'workStartedAt',
+          'createdAt', 'updatedAt'
+        ]) &&
+        request.resource.data.status == 'submitted' &&
+        request.resource.data.confirmationCount == 0 &&
+        request.resource.data.confirmedBy == [] &&
+        request.resource.data.escalationLevel == 0 &&
+        request.resource.data.escalated == false;
+
+      // Read access: creator, org staff/admin, org members (for browsing)
+      allow read: if isAuthenticated() && canReadReport(this);
+
+      // Update: creator can confirm, staff/admin can manage assigned cases
+      allow update: if isAuthenticated() && (
+        // Creator can confirm (increment confirmationCount, add to confirmedBy)
+        (isReportCreator(this) &&
+         request.resource.data.diff(resource.data).affectedKeys()
+           .hasOnly(['confirmationCount', 'confirmedBy', 'updatedAt'])) ||
+        // Staff/Admin can manage their assigned cases
+        (canManageReport(this) &&
+         request.resource.data.diff(resource.data).affectedKeys()
+           .hasOnly([
+             'status', 'statusHistory', 'assignedTo', 'assignedToName', 'assignedAt',
+             'areaId', 'areaName', 'ward', 'municipality',
+             'priority', 'escalationLevel', 'escalated', 'escalatedAt', 'escalatedBy', 'escalationReason',
+             'resolutionNote', 'resolvedAt', 'resolvedBy', 'resolutionImageUrls',
+             'disputeStatus', 'disputeReason', 'disputedAt', 'disputedBy',
+             'moderationStatus', 'moderationReason', 'moderatedBy', 'moderatedAt',
+             'acknowledgedAt', 'workStartedAt',
+             'updatedAt'
+           ])) ||
+        // Admin can update any field in their org (for assignment, escalation, etc.)
+        (isAdmin() && sameOrg(resource.data.organizationId) &&
+         request.resource.data.diff(resource.data).affectedKeys()
+           .hasOnly([
+             'status', 'statusHistory', 'assignedTo', 'assignedToName', 'assignedAt',
+             'areaId', 'areaName', 'ward', 'municipality',
+             'priority', 'escalationLevel', 'escalated', 'escalatedAt', 'escalatedBy', 'escalationReason',
+             'resolutionNote', 'resolvedAt', 'resolvedBy', 'resolutionImageUrls',
+             'disputeStatus', 'disputeReason', 'disputedAt', 'disputedBy',
+             'moderationStatus', 'moderationReason', 'moderatedBy', 'moderatedAt',
+             'acknowledgedAt', 'workStartedAt',
+             'updatedAt'
+           ]))
+      );
+
+      // Delete not allowed
+      allow delete: if false;
+
+      // ─── Subcollections: caseNotes ──────────────────────────────
+      match /caseNotes/{noteId} {
+        // Staff/Admin in same org can create
+        allow create: if isAuthenticated() &&
+          canManageReport(get(/databases/$(database)/documents/reports/$(reportId))) &&
+          request.resource.data.createdBy == request.auth.uid &&
+          request.resource.data.keys().hasOnly(['text', 'createdBy', 'createdByName', 'createdAt']);
+
+        // Staff/Admin in same org can read
+        allow read: if isAuthenticated() &&
+          canManageReport(get(/databases/$(database)/documents/reports/$(reportId)));
+
+        // No update/delete
+        allow update, delete: if false;
+      }
+
+      // ─── Subcollections: comments ───────────────────────────────
+      match /comments/{commentId} {
+        // Any authenticated user in same org can create
+        allow create: if isAuthenticated() &&
+          get(/databases/$(database)/documents/reports/$(reportId)).data.organizationId == getUserOrgId() &&
+          request.resource.data.createdBy == request.auth.uid &&
+          request.resource.data.keys().hasOnly(['text', 'createdBy', 'createdByName', 'role', 'createdAt']);
+
+        // Any authenticated user in same org can read
+        allow read: if isAuthenticated() &&
+          get(/databases/$(database)/documents/reports/$(reportId)).data.organizationId == getUserOrgId();
+
+        // No update/delete
+        allow update, delete: if false;
+      }
+    }
+
+    // ─── Areas Collection ────────────────────────────────────────────
+
+    match /areas/{areaId} {
+      // Admins/Managers can create areas in their org
+      allow create: if isAuthenticated() &&
+        canManageOrgAreas(request.resource.data.organizationId) &&
+        request.resource.data.keys().hasOnly([
+          'organizationId', 'name', 'type', 'code', 'description',
+          'municipality', 'province', 'country', 'active',
+          'assignedStaff', 'createdBy', 'createdAt', 'updatedAt'
+        ]) &&
+        request.resource.data.active == true;
+
+      // Anyone in org can read active areas
+      allow read: if isAuthenticated() &&
+        resource.data.organizationId == getUserOrgId() &&
+        (resource.data.active == true || isStaff());
+
+      // Admins/Managers can update areas in their org
+      allow update: if isAuthenticated() &&
+        canManageOrgAreas(resource.data.organizationId) &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['name', 'type', 'code', 'description', 'municipality', 'province', 'country',
+                    'active', 'assignedStaff', 'updatedAt']);
+
+      // Admins/Managers can delete (soft delete via active=false preferred)
+      allow delete: if isAuthenticated() && canManageOrgAreas(resource.data.organizationId);
+    }
+
+    // ─── Organizations Collection ────────────────────────────────────
+
+    match /organizations/{orgId} {
+      // Anyone can read their own org
+      allow read: if isAuthenticated() && sameOrg(orgId);
+
+      // Only platform admins can create organizations (via setup page)
+      allow create: if isAuthenticated() &&
+        request.resource.data.ownerId == request.auth.uid &&
+        request.resource.data.keys().hasOnly([
+          'name', 'type', 'description', 'city', 'province', 'country',
+          'ownerId', 'createdBy', 'status', 'memberCount',
+          'logo', 'primaryColor', 'accentColor', 'shortDescription',
+          'contactEmail', 'contactPhone',
+          'acknowledgementTargetHours', 'resolutionTargetHours',
+          'plan', 'subscriptionStatus', 'subscriptionStartedAt', 'subscriptionEndsAt',
+          'maxStaff', 'maxReportsPerMonth', 'analyticsEnabled', 'exportsEnabled', 'apiEnabled', 'brandingEnabled',
+          'reportsThisMonth', 'reportsMonthStart',
+          'permittedCategories', 'defaultSeverity',
+          'createdAt', 'updatedAt'
+        ]);
+
+      // Org admins can update their org (limited fields)
+      allow update: if isAuthenticated() && canManageOrg(orgId) &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly([
+            'name', 'type', 'description', 'city', 'province', 'country',
+            'logo', 'primaryColor', 'accentColor', 'shortDescription',
+            'contactEmail', 'contactPhone',
+            'acknowledgementTargetHours', 'resolutionTargetHours',
+            'plan', 'subscriptionStatus', 'subscriptionStartedAt', 'subscriptionEndsAt',
+            'maxStaff', 'maxReportsPerMonth', 'analyticsEnabled', 'exportsEnabled', 'apiEnabled', 'brandingEnabled',
+            'reportsThisMonth', 'reportsMonthStart',
+            'permittedCategories', 'defaultSeverity',
+            'updatedAt'
+          ]);
+
+      // No delete
+      allow delete: if false;
+    }
+
+    // ─── Organization Invites Collection ────────────────────────────
+
+    match /organizationInvites/{inviteId} {
+      // Admins/Staff can create invites for their org
+      allow create: if isAuthenticated() &&
+        canManageOrgInvites(request.resource.data.organizationId) &&
+        request.resource.data.keys().hasOnly([
+          'organizationId', 'organizationName', 'email', 'role',
+          'organizationRole', 'status', 'invitedBy', 'invitedByName',
+          'createdAt', 'expiresAt', 'acceptedAt', 'acceptedBy'
+        ]) &&
+        request.resource.data.status == 'pending' &&
+        request.resource.data.invitedBy == request.auth.uid;
+
+      // Invited user (by email) can read their pending invites
+      allow read: if isAuthenticated() &&
+        (resource.data.email == request.auth.token.email ||
+         (resource.data.organizationId == getUserOrgId() && canManageOrgInvites(getUserOrgId())));
+
+      // Invited user can accept (update status to accepted)
+      allow update: if isAuthenticated() &&
+        resource.data.email == request.auth.token.email &&
+        resource.data.status == 'pending' &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['status', 'acceptedAt', 'acceptedBy']);
+
+      // Org admins/staff can cancel invites (update status to cancelled)
+      allow update: if isAuthenticated() &&
+        canManageOrgInvites(resource.data.organizationId) &&
+        resource.data.status == 'pending' &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['status', 'cancelledAt', 'cancelledBy']);
+
+      // No delete
+      allow delete: if false;
+    }
+
+    // ─── Notifications Collection ────────────────────────────────────
+
+    match /notifications/{notificationId} {
+      // User can read their own notifications
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+
+      // System can create notifications (via client with validation)
+      allow create: if isAuthenticated() &&
+        request.resource.data.userId != request.auth.uid && // Can't notify self
+        request.resource.data.keys().hasOnly([
+          'userId', 'createdBy', 'type', 'title', 'message',
+          'reportId', 'organizationId', 'read', 'createdAt'
+        ]);
+
+      // User can mark their own as read
+      allow update: if isAuthenticated() &&
+        resource.data.userId == request.auth.uid &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['read']);
+
+      // No delete
+      allow delete: if false;
+    }
+
+    // ─── Audit Logs Collection ──────────────────────────────────────
+
+    match /auditLogs/{logId} {
+      // Org admins can read audit logs for their org
+      allow read: if isAuthenticated() &&
+        isOrgAdmin() &&
+        resource.data.organizationId == getUserOrgId();
+
+      // System creates audit logs (validated by client functions)
+      allow create: if isAuthenticated() &&
+        request.resource.data.performedBy == request.auth.uid &&
+        request.resource.data.organizationId == getUserOrgId() &&
+        request.resource.data.keys().hasOnly([
+          'organizationId', 'action', 'entityType', 'entityId',
+          'performedBy', 'performedByName', 'performedByRole',
+          'timestamp', 'metadata'
+        ]);
+
+      // No update/delete (immutable)
+      allow update, delete: if false;
+    }
+
+    // ─── Default Deny ────────────────────────────────────────────────
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

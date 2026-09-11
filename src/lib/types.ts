@@ -343,8 +343,10 @@ export interface Area {
   country?: string;
   active: boolean;
   assignedStaff?: string[];
+  organizationId?: string;
   createdAt?: FirestoreTimestamp;
   createdBy?: string;
+  updatedAt?: FirestoreTimestamp;
 }
 
 // ─── Audit Log ──────────────────────────────────────────

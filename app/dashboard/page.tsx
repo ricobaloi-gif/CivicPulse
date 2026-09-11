@@ -161,7 +161,7 @@ export default function DashboardPage() {
             <>
               <button
                 type="button"
-                onClick={() => router.push("/invites")}
+                onClick={() => router.push("/organization/invites")}
                 className="group rounded-2xl border border-yellow-900 bg-yellow-950/20 p-6 text-left transition hover:border-yellow-600"
               >
                 <div className="text-3xl">✉️</div>

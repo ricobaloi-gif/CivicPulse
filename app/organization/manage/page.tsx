@@ -1,193 +1,58 @@
 "use client";
 
-import {
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
-
-import {
-  useRouter,
-} from "next/navigation";
-
+import { useEffect, useMemo, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import {
   collection,
   doc,
   getDoc,
   getDocs,
-  serverTimestamp,
+  query,
+  where,
   updateDoc,
 } from "firebase/firestore";
 
+import { db } from "@/src/lib/firebase";
+import { useAuth } from "@/src/lib/AuthContext";
+import { Layout } from "@/src/components/Layout";
+import { EmptyState } from "@/src/components/EmptyState";
+import { RoleBadge } from "@/src/components/RoleBadge";
+import { formatRelativeTime } from "@/src/lib/constants";
 import {
-  db,
-} from "@/src/lib/firebase";
-
-import {
-  useAuth,
-} from "@/src/lib/AuthContext";
-
-type UserProfile = {
-  uid: string;
-  name?: string;
-  email?: string;
-  role?: string;
-
-  organizationId?: string | null;
-  organizationName?: string | null;
-  organizationRole?: string | null;
-};
-
-type Organization = {
-  id: string;
-  name: string;
-  type?: string;
-  description?: string;
-  city?: string;
-  province?: string;
-  country?: string;
-  ownerId: string;
-  status?: string;
-};
-
-function getDisplayName(
-  user: UserProfile
-) {
-  return (
-    user.name?.trim() ||
-    user.email ||
-    "Unnamed User"
-  );
-}
-
-function getRoleLabel(
-  role?: string
-) {
-  switch (
-    role
-      ?.toLowerCase()
-      .trim()
-  ) {
-    case "admin":
-      return "Admin";
-
-    case "staff":
-      return "Staff";
-
-    default:
-      return "Resident";
-  }
-}
-
-function getRoleClasses(
-  role?: string
-) {
-  switch (
-    role
-      ?.toLowerCase()
-      .trim()
-  ) {
-    case "admin":
-      return "border-blue-800 bg-blue-950/40 text-blue-300";
-
-    case "staff":
-      return "border-indigo-800 bg-indigo-950/40 text-indigo-300";
-
-    default:
-      return "border-gray-700 bg-gray-800 text-gray-300";
-  }
-}
-
-function getOrganizationRole(
-  user: UserProfile
-) {
-  const role =
-    user.role
-      ?.toLowerCase()
-      .trim();
-
-  if (
-    role === "admin"
-  ) {
-    return "manager";
-  }
-
-  if (
-    role === "staff"
-  ) {
-    return "staff";
-  }
-
-  return "member";
-}
+  createOrganizationInvite,
+  cancelOrganizationInvite,
+} from "@/src/lib/invitations";
+import { createAuditLog } from "@/src/lib/auditLog";
+import type {
+  Organization,
+  OrganizationInvite,
+  OrganizationRole,
+  UserProfile,
+} from "@/src/lib/types";
 
 export default function OrganizationManagePage() {
-  const router =
-    useRouter();
+  const router = useRouter();
+  const { user, profile } = useAuth();
 
-  const {
-    user,
-    loading: authLoading,
-  } = useAuth();
+  const [organization, setOrganization] = useState<Organization | null>(null);
+  const [members, setMembers] = useState<UserProfile[]>([]);
+  const [pendingInvites, setPendingInvites] = useState<OrganizationInvite[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [inviting, setInviting] = useState(false);
+  const [cancellingInviteId, setCancellingInviteId] = useState<string | null>(null);
+  const [updatingMemberId, setUpdatingMemberId] = useState<string | null>(null);
 
-  const [
-    profile,
-    setProfile,
-  ] =
-    useState<UserProfile | null>(
-      null
-    );
+  // Invite form state
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState<"staff" | "admin" | "member">("staff");
 
-  const [
-    organization,
-    setOrganization,
-  ] =
-    useState<Organization | null>(
-      null
-    );
+  const [search, setSearch] = useState("");
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
 
-  const [
-    users,
-    setUsers,
-  ] =
-    useState<UserProfile[]>(
-      []
-    );
-
-  const [
-    loading,
-    setLoading,
-  ] =
-    useState(true);
-
-  const [
-    updatingUserId,
-    setUpdatingUserId,
-  ] =
-    useState<string | null>(
-      null
-    );
-
-  const [
-    search,
-    setSearch,
-  ] =
-    useState("");
-
-  const [
-    error,
-    setError,
-  ] =
-    useState("");
-
-  const [
-    success,
-    setSuccess,
-  ] =
-    useState("");
-
-  async function loadEverything() {
-    if (!user) {
+  const loadOrgData = useCallback(async () => {
+    if (!profile?.organizationId) {
+      setLoading(false);
       return;
     }
 
@@ -195,801 +60,531 @@ export default function OrganizationManagePage() {
       setLoading(true);
       setError("");
 
-      const currentUserRef =
-        doc(
-          db,
-          "users",
-          user.uid
-        );
+      const orgId = profile.organizationId;
 
-      const currentUserSnapshot =
-        await getDoc(
-          currentUserRef
-        );
-
-      if (
-        !currentUserSnapshot.exists()
-      ) {
-        setError(
-          "Your CivicPulse profile could not be found."
-        );
-
-        return;
+      // 1. Fetch organization details
+      const orgRef = doc(db, "organizations", orgId);
+      const orgSnap = await getDoc(orgRef);
+      if (orgSnap.exists()) {
+        setOrganization({ id: orgSnap.id, ...orgSnap.data() } as Organization);
       }
 
-      const currentProfile =
-        currentUserSnapshot.data() as UserProfile;
-
-      setProfile(
-        currentProfile
+      // 2. Fetch current members
+      const membersQuery = query(
+        collection(db, "users"),
+        where("organizationId", "==", orgId)
       );
+      const membersSnap = await getDocs(membersQuery);
+      const membersList = membersSnap.docs.map((d) => ({
+        uid: d.id,
+        ...d.data(),
+      })) as UserProfile[];
 
-      const role =
-        currentProfile.role
-          ?.toLowerCase()
-          .trim();
+      membersList.sort((a, b) => {
+        const nameA = a.name || a.email || "";
+        const nameB = b.name || b.email || "";
+        return nameA.localeCompare(nameB);
+      });
+      setMembers(membersList);
 
-      if (
-        role !== "admin"
-      ) {
-        return;
-      }
-
-      if (
-        !currentProfile.organizationId
-      ) {
-        return;
-      }
-
-      const organizationRef =
-        doc(
-          db,
-          "organizations",
-          currentProfile.organizationId
-        );
-
-      const organizationSnapshot =
-        await getDoc(
-          organizationRef
-        );
-
-      if (
-        !organizationSnapshot.exists()
-      ) {
-        setError(
-          "Your organisation could not be found."
-        );
-
-        return;
-      }
-
-      setOrganization({
-        id:
-          organizationSnapshot.id,
-
-        ...organizationSnapshot.data(),
-      } as Organization);
-
-      const usersSnapshot =
-        await getDocs(
-          collection(
-            db,
-            "users"
-          )
-        );
-
-      const allUsers =
-        usersSnapshot.docs.map(
-          (
-            userDoc
-          ) => ({
-            uid:
-              userDoc.id,
-
-            ...userDoc.data(),
-          })
-        ) as UserProfile[];
-
-      allUsers.sort(
-        (
-          a,
-          b
-        ) =>
-          getDisplayName(
-            a
-          ).localeCompare(
-            getDisplayName(
-              b
-            )
-          )
+      // 3. Fetch pending invitations
+      const invitesQuery = query(
+        collection(db, "organizationInvites"),
+        where("organizationId", "==", orgId),
+        where("status", "==", "pending")
       );
+      const invitesSnap = await getDocs(invitesQuery);
+      const invitesList = invitesSnap.docs.map((d) => ({
+        id: d.id,
+        ...d.data(),
+      })) as OrganizationInvite[];
 
-      setUsers(
-        allUsers
-      );
+      setPendingInvites(invitesList);
     } catch (err) {
-      console.error(
-        "Organisation management load error:",
-        err
-      );
-
-      setError(
-        "Unable to load organisation management."
-      );
+      console.error("Organisation management load error:", err);
+      setError("Unable to load organisation data.");
     } finally {
       setLoading(false);
     }
-  }
+  }, [profile?.organizationId]);
 
   useEffect(() => {
-    if (
-      authLoading
-    ) {
-      return;
+    if (profile?.organizationId) {
+      loadOrgData();
+    } else {
+      setLoading(false);
     }
+  }, [profile?.organizationId, loadOrgData]);
 
-    if (!user) {
-      router.replace(
-        "/login"
-      );
+  // Send invitation
+  async function handleSendInvite(e: React.FormEvent) {
+    e.preventDefault();
+    if (!user || !profile?.organizationId || !organization) return;
 
-      return;
-    }
-
-    loadEverything();
-  }, [
-    user,
-    authLoading,
-  ]);
-
-  async function handleAddMember(
-    member: UserProfile
-  ) {
-    if (
-      !user ||
-      !profile ||
-      !organization
-    ) {
+    const trimmedEmail = inviteEmail.trim().toLowerCase();
+    if (!trimmedEmail) {
+      setError("Please enter a valid email address.");
       return;
     }
 
     try {
-      setUpdatingUserId(
-        member.uid
-      );
-
+      setInviting(true);
       setError("");
       setSuccess("");
 
-      const memberRef =
-        doc(
-          db,
-          "users",
-          member.uid
-        );
+      const inviterName = profile.name?.trim() || user.email || "Admin";
 
-      await updateDoc(
-        memberRef,
-        {
-          organizationId:
-            organization.id,
+      await createOrganizationInvite({
+        organizationId: organization.id || profile.organizationId,
+        organizationName: organization.name,
+        email: trimmedEmail,
+        targetRole: inviteRole,
+        invitedBy: user.uid,
+        invitedByName: inviterName,
+        invitedByRole: profile.role || "admin",
+      });
 
-          organizationName:
-            organization.name,
-
-          organizationRole:
-            getOrganizationRole(
-              member
-            ),
-
-          organizationJoinedAt:
-            serverTimestamp(),
-        }
-      );
-
-      setSuccess(
-        `${getDisplayName(
-          member
-        )} was added to ${organization.name}.`
-      );
-
-      await loadEverything();
-    } catch (err) {
-      console.error(
-        "Add organisation member error:",
-        err
-      );
-
-      setError(
-        "Failed to add this user to the organisation."
-      );
+      setSuccess(`Invitation successfully sent to ${trimmedEmail}.`);
+      setInviteEmail("");
+      await loadOrgData();
+    } catch (err: unknown) {
+      console.error("Invite error:", err);
+      setError(err instanceof Error ? err.message : "Failed to send invitation.");
     } finally {
-      setUpdatingUserId(
-        null
-      );
+      setInviting(false);
     }
   }
 
-  async function handleRemoveMember(
-    member: UserProfile
-  ) {
-    if (
-      !user ||
-      !organization
-    ) {
+  // Cancel invitation
+  async function handleCancelInvite(invite: OrganizationInvite) {
+    if (!user || !profile?.organizationId || !invite.id) return;
+
+    try {
+      setCancellingInviteId(invite.id);
+      setError("");
+      setSuccess("");
+
+      await cancelOrganizationInvite(
+        invite.id,
+        profile.organizationId,
+        user.uid,
+        profile.name || user.email || "Admin",
+        profile.role || "admin"
+      );
+
+      setSuccess(`Invitation for ${invite.email} was cancelled.`);
+      await loadOrgData();
+    } catch (err: unknown) {
+      console.error("Cancel invite error:", err);
+      setError(err instanceof Error ? err.message : "Failed to cancel invitation.");
+    } finally {
+      setCancellingInviteId(null);
+    }
+  }
+
+  // Remove member
+  async function handleRemoveMember(member: UserProfile) {
+    if (!user || !organization || !profile?.organizationId) return;
+
+    if (member.uid === organization.ownerId) {
+      setError("The organisation owner cannot be removed.");
       return;
     }
 
-    if (
-      member.uid ===
-      organization.ownerId
-    ) {
-      setError(
-        "The organisation owner cannot be removed."
-      );
+    if (member.uid === user.uid) {
+      setError("You cannot remove yourself from here.");
+      return;
+    }
 
+    if (!confirm(`Are you sure you want to remove ${member.name || member.email} from the organisation?`)) {
       return;
     }
 
     try {
-      setUpdatingUserId(
-        member.uid
-      );
-
+      setUpdatingMemberId(member.uid);
       setError("");
       setSuccess("");
 
-      const memberRef =
-        doc(
-          db,
-          "users",
-          member.uid
-        );
+      const memberRef = doc(db, "users", member.uid);
+      await updateDoc(memberRef, {
+        organizationId: null,
+        organizationName: null,
+        organizationRole: null,
+        organizationJoinedAt: null,
+        role: "resident",
+      });
 
-      await updateDoc(
-        memberRef,
-        {
-          organizationId:
-            null,
+      await createAuditLog({
+        organizationId: profile.organizationId,
+        action: "member_removed",
+        entityType: "user",
+        entityId: member.uid,
+        performedBy: user.uid,
+        performedByName: profile.name || user.email || "Admin",
+        performedByRole: profile.role || "admin",
+        metadata: {
+          removedMemberEmail: member.email,
+          previousRole: member.role,
+        },
+      });
 
-          organizationName:
-            null,
-
-          organizationRole:
-            null,
-
-          organizationJoinedAt:
-            null,
-        }
-      );
-
-      setSuccess(
-        `${getDisplayName(
-          member
-        )} was removed from ${organization.name}.`
-      );
-
-      await loadEverything();
+      setSuccess(`${member.name || member.email} was removed from ${organization.name}.`);
+      await loadOrgData();
     } catch (err) {
-      console.error(
-        "Remove organisation member error:",
-        err
-      );
-
-      setError(
-        "Failed to remove this user from the organisation."
-      );
+      console.error("Remove member error:", err);
+      setError("Failed to remove this member.");
     } finally {
-      setUpdatingUserId(
-        null
-      );
+      setUpdatingMemberId(null);
     }
   }
 
-  const organizationMembers =
-    useMemo(
-      () => {
-        if (
-          !organization
-        ) {
-          return [];
-        }
-
-        return users.filter(
-          (
-            member
-          ) =>
-            member.organizationId ===
-            organization.id
-        );
-      },
-      [
-        users,
-        organization,
-      ]
-    );
-
-  const availableUsers =
-    useMemo(
-      () => {
-        if (
-          !organization
-        ) {
-          return [];
-        }
-
-        const normalizedSearch =
-          search
-            .trim()
-            .toLowerCase();
-
-        return users.filter(
-          (
-            candidate
-          ) => {
-            if (
-              candidate.organizationId
-            ) {
-              return false;
-            }
-
-            if (
-              candidate.uid ===
-              user?.uid
-            ) {
-              return false;
-            }
-
-            if (
-              !normalizedSearch
-            ) {
-              return true;
-            }
-
-            const haystack =
-              [
-                candidate.name,
-                candidate.email,
-                candidate.role,
-              ]
-                .filter(
-                  Boolean
-                )
-                .join(
-                  " "
-                )
-                .toLowerCase();
-
-            return haystack.includes(
-              normalizedSearch
-            );
-          }
-        );
-      },
-      [
-        users,
-        organization,
-        search,
-        user,
-      ]
-    );
-
-  if (
-    authLoading ||
-    loading
+  // Change member role
+  async function handleChangeMemberRole(
+    member: UserProfile,
+    newRole: "staff" | "admin" | "resident"
   ) {
-    return (
-      <main className="flex min-h-screen items-center justify-center bg-gray-950 text-white">
-        <div className="text-center">
-          <div className="mx-auto h-10 w-10 animate-spin rounded-full border-4 border-gray-700 border-t-blue-500" />
+    if (!user || !organization || !profile?.organizationId) return;
 
-          <p className="mt-4 text-gray-400">
-            Loading organisation...
-          </p>
-        </div>
-      </main>
-    );
+    if (member.uid === organization.ownerId) {
+      setError("The organisation owner's role cannot be modified.");
+      return;
+    }
+
+    try {
+      setUpdatingMemberId(member.uid);
+      setError("");
+      setSuccess("");
+
+      let orgRole: OrganizationRole = "member";
+      if (newRole === "admin") orgRole = "admin";
+      if (newRole === "staff") orgRole = "staff";
+
+      const memberRef = doc(db, "users", member.uid);
+      await updateDoc(memberRef, {
+        role: newRole,
+        organizationRole: orgRole,
+      });
+
+      await createAuditLog({
+        organizationId: profile.organizationId,
+        action: "org_settings_changed",
+        entityType: "user",
+        entityId: member.uid,
+        performedBy: user.uid,
+        performedByName: profile.name || user.email || "Admin",
+        performedByRole: profile.role || "admin",
+        metadata: {
+          action: "member_role_changed",
+          memberEmail: member.email,
+          newRole,
+          newOrgRole: orgRole,
+        },
+      });
+
+      setSuccess(`Role updated to ${newRole} for ${member.name || member.email}.`);
+      await loadOrgData();
+    } catch (err) {
+      console.error("Update role error:", err);
+      setError("Failed to update member role.");
+    } finally {
+      setUpdatingMemberId(null);
+    }
   }
 
-  if (!user) {
-    return null;
-  }
+  // Filtered members list
+  const filteredMembers = useMemo(() => {
+    if (!search.trim()) return members;
+    const s = search.toLowerCase().trim();
+    return members.filter((m) => {
+      const name = m.name?.toLowerCase() || "";
+      const email = m.email?.toLowerCase() || "";
+      const role = m.role?.toLowerCase() || "";
+      return name.includes(s) || email.includes(s) || role.includes(s);
+    });
+  }, [members, search]);
 
-  const role =
-    profile?.role
-      ?.toLowerCase()
-      .trim();
-
-  if (
-    role !== "admin"
-  ) {
+  if (!profile?.organizationId) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-gray-950 p-6 text-white">
-        <div className="w-full max-w-lg rounded-2xl border border-red-900 bg-gray-900 p-8 text-center">
-          <div className="text-5xl">
-            🔒
-          </div>
-
-          <h1 className="mt-5 text-3xl font-bold">
-            Access Denied
-          </h1>
-
-          <p className="mt-3 text-gray-400">
-            Only administrators can manage CivicPulse organisations.
-          </p>
-
+      <Layout requireRole={["admin"]} title="Organisation">
+        <EmptyState
+          icon="🏢"
+          title="No Organisation"
+          message="Create an organisation first before managing members and invitations."
+        />
+        <div className="mt-4 text-center">
           <button
             type="button"
-            onClick={() =>
-              router.push(
-                "/dashboard"
-              )
-            }
-            className="mt-6 rounded-lg bg-blue-600 px-6 py-3 font-semibold hover:bg-blue-500"
-          >
-            Dashboard
-          </button>
-        </div>
-      </main>
-    );
-  }
-
-  if (
-    !profile?.organizationId
-  ) {
-    return (
-      <main className="flex min-h-screen items-center justify-center bg-gray-950 p-6 text-white">
-        <div className="w-full max-w-lg rounded-2xl border border-gray-800 bg-gray-900 p-8 text-center">
-          <div className="text-5xl">
-            🏢
-          </div>
-
-          <h1 className="mt-5 text-3xl font-bold">
-            No Organisation
-          </h1>
-
-          <p className="mt-3 text-gray-400">
-            Create an organisation before managing members.
-          </p>
-
-          <button
-            type="button"
-            onClick={() =>
-              router.push(
-                "/organization/setup"
-              )
-            }
-            className="mt-6 rounded-lg bg-blue-600 px-6 py-3 font-semibold hover:bg-blue-500"
+            onClick={() => router.push("/organization/setup")}
+            className="rounded-lg bg-blue-600 px-6 py-3 font-semibold hover:bg-blue-500"
           >
             Create Organisation
           </button>
         </div>
-      </main>
-    );
-  }
-
-  if (!organization) {
-    return (
-      <main className="flex min-h-screen items-center justify-center bg-gray-950 p-6 text-white">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold">
-            Organisation unavailable
-          </h1>
-
-          <p className="mt-3 text-gray-400">
-            {error ||
-              "The organisation could not be loaded."}
-          </p>
-        </div>
-      </main>
+      </Layout>
     );
   }
 
   return (
-    <main className="min-h-screen bg-gray-950 text-white">
-      <div className="mx-auto max-w-6xl p-6 lg:p-8">
+    <Layout requireRole={["admin"]} title="Organisation Team">
+      <div className="mx-auto max-w-6xl">
+        {/* Navigation bar */}
         <div className="flex flex-wrap items-center justify-between gap-4">
           <button
             type="button"
-            onClick={() =>
-              router.push(
-                "/dashboard"
-              )
-            }
-            className="text-gray-400 hover:text-white"
+            onClick={() => router.push("/admin")}
+            className="text-sm text-gray-400 hover:text-white"
           >
-            ← Dashboard
+            ← Back to Operations
           </button>
 
-          <button
-            type="button"
-            onClick={() =>
-              router.push(
-                "/admin"
-              )
-            }
-            className="rounded-lg border border-gray-700 bg-gray-900 px-4 py-3 text-sm font-semibold hover:bg-gray-800"
-          >
-            Operations
-          </button>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => router.push("/organization/areas")}
+              className="rounded-lg border border-gray-700 bg-gray-900 px-4 py-2 text-sm font-semibold hover:bg-gray-800"
+            >
+              📍 Manage Areas
+            </button>
+          </div>
         </div>
 
-        <header className="mt-8">
-          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-400">
-            Organisation Management
+        {/* Org Header */}
+        <header className="mt-6 rounded-2xl border border-gray-800 bg-gray-900 p-6">
+          <p className="text-xs font-semibold uppercase tracking-widest text-blue-400">
+            Organisation Team Management
           </p>
-
-          <h1 className="mt-3 text-4xl font-bold">
-            {
-              organization.name
-            }
+          <h1 className="mt-2 text-3xl font-bold">
+            {organization?.name || profile.organizationName || "Your Organisation"}
           </h1>
+          {organization?.description && (
+            <p className="mt-2 text-gray-400">{organization.description}</p>
+          )}
 
-          <p className="mt-3 text-gray-400">
-            Manage the CivicPulse accounts that belong to this organisation.
-          </p>
-
-          <div className="mt-6 flex flex-wrap gap-3">
-            {organization.type && (
-              <span className="rounded-full border border-gray-700 bg-gray-900 px-4 py-2 text-sm text-gray-300">
-                {
-                  organization.type
-                }
+          <div className="mt-4 flex flex-wrap gap-2 text-xs">
+            {organization?.type && (
+              <span className="rounded-md border border-gray-700 bg-gray-800 px-3 py-1 text-gray-300">
+                {organization.type}
               </span>
             )}
-
-            {organization.city && (
-              <span className="rounded-full border border-gray-700 bg-gray-900 px-4 py-2 text-sm text-gray-300">
-                📍{" "}
-                {
-                  organization.city
-                }
+            {organization?.city && (
+              <span className="rounded-md border border-gray-700 bg-gray-800 px-3 py-1 text-gray-300">
+                📍 {organization.city}
               </span>
             )}
-
-            <span className="rounded-full border border-green-900 bg-green-950/30 px-4 py-2 text-sm font-semibold text-green-300">
-              {
-                organizationMembers.length
-              }{" "}
-              Member
-              {organizationMembers.length ===
-              1
-                ? ""
-                : "s"}
+            <span className="rounded-md border border-green-800 bg-green-950/40 px-3 py-1 font-semibold text-green-300">
+              👥 {members.length} Member{members.length !== 1 ? "s" : ""}
+            </span>
+            <span className="rounded-md border border-amber-800 bg-amber-950/40 px-3 py-1 font-semibold text-amber-300">
+              📨 {pendingInvites.length} Pending Invite{pendingInvites.length !== 1 ? "s" : ""}
             </span>
           </div>
         </header>
 
+        {/* Feedback alerts */}
         {error && (
           <div className="mt-6 rounded-xl border border-red-900 bg-red-950/30 p-4 text-red-300">
-            {
-              error
-            }
+            {error}
           </div>
         )}
 
         {success && (
           <div className="mt-6 rounded-xl border border-green-900 bg-green-950/30 p-4 text-green-300">
-            {
-              success
-            }
+            {success}
           </div>
         )}
 
-        <section className="mt-10">
-          <div className="flex flex-wrap items-end justify-between gap-4">
-            <div>
-              <p className="text-sm font-semibold uppercase tracking-wider text-indigo-400">
-                Current Team
-              </p>
+        {/* Invite New Member Section */}
+        <section className="mt-8 rounded-2xl border border-gray-800 bg-gray-900 p-6">
+          <h2 className="text-xl font-bold">Invite Member by Email</h2>
+          <p className="mt-1 text-sm text-gray-400">
+            Send an invitation to join your organisation. The user will receive an in-app invite and must securely accept it.
+          </p>
 
-              <h2 className="mt-2 text-2xl font-bold">
-                Organisation Members
-              </h2>
-            </div>
+          <form onSubmit={handleSendInvite} className="mt-5 flex flex-col gap-3 sm:flex-row">
+            <input
+              type="email"
+              value={inviteEmail}
+              onChange={(e) => setInviteEmail(e.target.value)}
+              placeholder="user@example.com"
+              required
+              className="flex-1 rounded-xl border border-gray-700 bg-gray-950 px-4 py-3 text-sm outline-none focus:border-blue-500"
+            />
+
+            <select
+              value={inviteRole}
+              onChange={(e) => setInviteRole(e.target.value as "staff" | "admin" | "member")}
+              className="rounded-xl border border-gray-700 bg-gray-950 px-4 py-3 text-sm outline-none focus:border-blue-500"
+            >
+              <option value="staff">Staff (Case Management)</option>
+              <option value="admin">Admin (Full Org Control)</option>
+              <option value="member">Member (Resident/Viewer)</option>
+            </select>
+
+            <button
+              type="submit"
+              disabled={inviting || !inviteEmail.trim()}
+              className="rounded-xl bg-blue-600 px-6 py-3 text-sm font-semibold hover:bg-blue-500 disabled:opacity-50"
+            >
+              {inviting ? "Sending..." : "Send Invite"}
+            </button>
+          </form>
+        </section>
+
+        {/* Pending Invitations Section */}
+        <section className="mt-10">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-bold">
+              Pending Invitations ({pendingInvites.length})
+            </h2>
           </div>
 
-          <div className="mt-5 space-y-3">
-            {organizationMembers.length ===
-            0 ? (
-              <div className="rounded-xl border border-gray-800 bg-gray-900 p-8 text-center text-gray-400">
-                No members found.
+          <div className="mt-4 space-y-3">
+            {pendingInvites.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-gray-800 p-6 text-center text-sm text-gray-500">
+                No pending invitations. Use the form above to invite team members.
               </div>
             ) : (
-              organizationMembers.map(
-                (
-                  member
-                ) => {
-                  const isOwner =
-                    member.uid ===
-                    organization.ownerId;
-
-                  return (
-                    <div
-                      key={
-                        member.uid
-                      }
-                      className="flex flex-col gap-4 rounded-2xl border border-gray-800 bg-gray-900 p-5 sm:flex-row sm:items-center sm:justify-between"
-                    >
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className="truncate text-lg font-bold">
-                            {getDisplayName(
-                              member
-                            )}
-                          </p>
-
-                          <span
-                            className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${getRoleClasses(
-                              member.role
-                            )}`}
-                          >
-                            {getRoleLabel(
-                              member.role
-                            )}
-                          </span>
-
-                          {isOwner && (
-                            <span className="rounded-full border border-yellow-800 bg-yellow-950/30 px-2.5 py-1 text-xs font-semibold text-yellow-300">
-                              Owner
-                            </span>
-                          )}
-                        </div>
-
-                        {member.email && (
-                          <p className="mt-1 text-sm text-gray-500">
-                            {
-                              member.email
-                            }
-                          </p>
-                        )}
-
-                        <p className="mt-2 text-xs uppercase tracking-wider text-gray-500">
-                          Organisation role:{" "}
-                          {member.organizationRole ||
-                            "member"}
-                        </p>
-                      </div>
-
-                      {!isOwner && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            handleRemoveMember(
-                              member
-                            )
-                          }
-                          disabled={
-                            updatingUserId ===
-                            member.uid
-                          }
-                          className="rounded-lg border border-red-900 bg-red-950/30 px-4 py-2 text-sm font-semibold text-red-300 hover:bg-red-950 disabled:opacity-50"
-                        >
-                          {updatingUserId ===
-                          member.uid
-                            ? "Removing..."
-                            : "Remove"}
-                        </button>
-                      )}
+              pendingInvites.map((invite) => (
+                <div
+                  key={invite.id}
+                  className="flex flex-col gap-3 rounded-xl border border-gray-800 bg-gray-900/60 p-4 sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-white">{invite.email}</span>
+                      <span className="rounded-full border border-amber-800 bg-amber-950/40 px-2.5 py-0.5 text-xs font-semibold text-amber-300">
+                        Pending
+                      </span>
+                      <span className="rounded-full border border-gray-700 bg-gray-800 px-2.5 py-0.5 text-xs text-gray-300 capitalize">
+                        Role: {invite.role || invite.organizationRole}
+                      </span>
                     </div>
-                  );
-                }
-              )
+                    <div className="mt-1 text-xs text-gray-500">
+                      {invite.invitedByName && <span>Invited by {invite.invitedByName} • </span>}
+                      {invite.createdAt && <span>Sent {formatRelativeTime(invite.createdAt)}</span>}
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => handleCancelInvite(invite)}
+                    disabled={cancellingInviteId === invite.id}
+                    className="rounded-lg border border-red-900 bg-red-950/30 px-3 py-1.5 text-xs font-semibold text-red-300 hover:bg-red-900 disabled:opacity-50"
+                  >
+                    {cancellingInviteId === invite.id ? "Cancelling..." : "Cancel Invite"}
+                  </button>
+                </div>
+              ))
             )}
           </div>
         </section>
 
+        {/* Current Team Members Section */}
         <section className="mt-12">
-          <div>
-            <p className="text-sm font-semibold uppercase tracking-wider text-green-400">
-              Add People
-            </p>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-xl font-bold">Team Members ({members.length})</h2>
+              <p className="mt-1 text-sm text-gray-400">
+                Accounts active in this organisation.
+              </p>
+            </div>
 
-            <h2 className="mt-2 text-2xl font-bold">
-              Available CivicPulse Users
-            </h2>
-
-            <p className="mt-2 text-sm text-gray-400">
-              These accounts do not currently belong to an organisation.
-            </p>
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search members..."
+              className="w-full sm:w-64 rounded-xl border border-gray-700 bg-gray-900 px-4 py-2 text-sm outline-none focus:border-blue-500"
+            />
           </div>
 
-          <input
-            type="text"
-            value={
-              search
-            }
-            onChange={(
-              event
-            ) =>
-              setSearch(
-                event.target.value
-              )
-            }
-            placeholder="Search by name, email or role..."
-            className="mt-5 w-full rounded-xl border border-gray-700 bg-gray-900 px-4 py-3 outline-none placeholder:text-gray-600 focus:border-blue-500"
-          />
-
-          <div className="mt-5 space-y-3">
-            {availableUsers.length ===
-            0 ? (
-              <div className="rounded-xl border border-dashed border-gray-700 p-8 text-center">
-                <div className="text-4xl">
-                  👥
-                </div>
-
-                <p className="mt-4 font-semibold">
-                  No available users
-                </p>
-
-                <p className="mt-2 text-sm text-gray-500">
-                  New CivicPulse accounts will appear here once they register.
-                </p>
+          <div className="mt-4 space-y-3">
+            {loading ? (
+              <div className="flex justify-center py-12">
+                <div className="h-8 w-8 animate-spin rounded-full border-4 border-gray-700 border-t-blue-500" />
+              </div>
+            ) : filteredMembers.length === 0 ? (
+              <div className="rounded-xl border border-gray-800 bg-gray-900 p-8 text-center text-gray-400">
+                No members found matching your search.
               </div>
             ) : (
-              availableUsers.map(
-                (
-                  candidate
-                ) => (
+              filteredMembers.map((member) => {
+                const isOwner = member.uid === organization?.ownerId;
+                const isSelf = member.uid === user?.uid;
+
+                return (
                   <div
-                    key={
-                      candidate.uid
-                    }
+                    key={member.uid}
                     className="flex flex-col gap-4 rounded-2xl border border-gray-800 bg-gray-900 p-5 sm:flex-row sm:items-center sm:justify-between"
                   >
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
-                        <p className="truncate text-lg font-bold">
-                          {getDisplayName(
-                            candidate
-                          )}
+                        <p className="truncate text-base font-bold text-white">
+                          {member.name || member.email || "Unnamed Member"}
                         </p>
 
-                        <span
-                          className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${getRoleClasses(
-                            candidate.role
-                          )}`}
-                        >
-                          {getRoleLabel(
-                            candidate.role
-                          )}
-                        </span>
+                        <RoleBadge role={member.role || "resident"} />
+
+                        {isOwner && (
+                          <span className="rounded-full border border-yellow-800 bg-yellow-950/40 px-2.5 py-0.5 text-xs font-semibold text-yellow-300">
+                            Owner
+                          </span>
+                        )}
+
+                        {isSelf && (
+                          <span className="rounded-full border border-blue-800 bg-blue-950/40 px-2.5 py-0.5 text-xs text-blue-300">
+                            You
+                          </span>
+                        )}
                       </div>
 
-                      {candidate.email && (
-                        <p className="mt-1 text-sm text-gray-500">
-                          {
-                            candidate.email
-                          }
-                        </p>
+                      {member.email && (
+                        <p className="mt-1 text-sm text-gray-400">{member.email}</p>
                       )}
+
+                      <p className="mt-1 text-xs text-gray-500">
+                        Org Role: {member.organizationRole || "member"}
+                        {member.organizationJoinedAt && (
+                          <span> • Joined {formatRelativeTime(member.organizationJoinedAt)}</span>
+                        )}
+                      </p>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() =>
-                        handleAddMember(
-                          candidate
-                        )
-                      }
-                      disabled={
-                        updatingUserId ===
-                        candidate.uid
-                      }
-                      className="rounded-lg bg-blue-600 px-5 py-2.5 font-semibold hover:bg-blue-500 disabled:opacity-50"
-                    >
-                      {updatingUserId ===
-                      candidate.uid
-                        ? "Adding..."
-                        : "Add to Organisation"}
-                    </button>
+                    {!isOwner && !isSelf && (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <select
+                          value={member.role || "resident"}
+                          onChange={(e) =>
+                            handleChangeMemberRole(
+                              member,
+                              e.target.value as "staff" | "admin" | "resident"
+                            )
+                          }
+                          disabled={updatingMemberId === member.uid}
+                          className="rounded-lg border border-gray-700 bg-gray-800 px-3 py-1.5 text-xs text-gray-200 outline-none focus:border-blue-500 disabled:opacity-50"
+                        >
+                          <option value="admin">Admin</option>
+                          <option value="staff">Staff</option>
+                          <option value="resident">Member</option>
+                        </select>
+
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveMember(member)}
+                          disabled={updatingMemberId === member.uid}
+                          className="rounded-lg border border-red-900 bg-red-950/30 px-3 py-1.5 text-xs font-semibold text-red-300 hover:bg-red-950 disabled:opacity-50"
+                        >
+                          {updatingMemberId === member.uid ? "Updating..." : "Remove"}
+                        </button>
+                      </div>
+                    )}
                   </div>
-                )
-              )
+                );
+              })
             )}
           </div>
         </section>
       </div>
-    </main>
+    </Layout>
   );
 }

@@ -7,6 +7,7 @@ import { db } from "@/src/lib/firebase";
 import { useAuth } from "@/src/lib/AuthContext";
 import { Layout } from "@/src/components/Layout";
 import { CATEGORIES, SEVERITIES, calculateDistanceMeters, isResolvedStatus, encodeGeohash, compressImage } from "@/src/lib/constants";
+import type { Area } from "@/src/lib/types";
 import * as maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 
@@ -38,10 +39,58 @@ export default function NewReportPage() {
   const [duplicateReport, setDuplicateReport] = useState<ExistingReport | null>(null);
   const [checkingDuplicate, setCheckingDuplicate] = useState(false);
 
+  // Area and jurisdiction state
+  const [areas, setAreas] = useState<Area[]>([]);
+  const [selectedAreaId, setSelectedAreaId] = useState("");
+  const [areaName, setAreaName] = useState("");
+  const [ward, setWard] = useState("");
+  const [municipality, setMunicipality] = useState("");
+
   // Map refs for pin correction
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const markerRef = useRef<maplibregl.Marker | null>(null);
+
+  // Load organization areas if user belongs to an org
+  useEffect(() => {
+    async function loadAreas() {
+      if (!profile?.organizationId) return;
+      try {
+        const q = query(
+          collection(db, "areas"),
+          where("organizationId", "==", profile.organizationId),
+          where("active", "==", true)
+        );
+        const snap = await getDocs(q);
+        const items = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Area));
+        items.sort((a, b) => a.name.localeCompare(b.name));
+        setAreas(items);
+      } catch (err) {
+        console.warn("Failed to load areas for report:", err);
+      }
+    }
+    loadAreas();
+  }, [profile?.organizationId]);
+
+  function handleAreaSelect(areaId: string) {
+    setSelectedAreaId(areaId);
+    if (!areaId) {
+      setAreaName("");
+      return;
+    }
+    const found = areas.find((a) => a.id === areaId);
+    if (found) {
+      setAreaName(found.name);
+      if (found.type === "ward") {
+        setWard(found.code || found.name);
+      } else if (found.code) {
+        setWard(found.code);
+      }
+      if (found.municipality) {
+        setMunicipality(found.municipality);
+      }
+    }
+  }
 
   // Cleanup preview URL on unmount
   useEffect(() => {
@@ -236,6 +285,10 @@ export default function NewReportPage() {
         createdByName: profile?.name || "",
         organizationId: profile?.organizationId ?? null,
         organizationName: profile?.organizationName ?? null,
+        areaId: selectedAreaId || null,
+        areaName: areaName || null,
+        ward: ward.trim() || null,
+        municipality: municipality.trim() || null,
         confirmationCount: 0,
         confirmedBy: [],
         submittedAt: serverTimestamp(),
@@ -317,6 +370,85 @@ export default function NewReportPage() {
                 </select>
               </div>
             </div>
+
+            {/* Area and Ward Selection */}
+            {areas.length > 0 ? (
+              <div className="rounded-xl border border-gray-800 bg-gray-950 p-4 space-y-4">
+                <div>
+                  <label htmlFor="report-area" className="mb-2 block text-sm font-semibold">
+                    Service Area / Ward
+                  </label>
+                  <select
+                    id="report-area"
+                    value={selectedAreaId}
+                    onChange={(e) => handleAreaSelect(e.target.value)}
+                    className="w-full rounded-xl border border-gray-700 bg-gray-900 px-4 py-3 text-sm outline-none focus:border-blue-500"
+                  >
+                    <option value="">-- Select Area or Ward (Optional) --</option>
+                    {areas.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.name} ({a.type}){a.code ? ` - ${a.code}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div>
+                    <label htmlFor="report-ward" className="mb-2 block text-xs font-semibold uppercase tracking-wider text-gray-400">
+                      Ward / Code
+                    </label>
+                    <input
+                      id="report-ward"
+                      type="text"
+                      value={ward}
+                      onChange={(e) => setWard(e.target.value)}
+                      placeholder="e.g. Ward 34"
+                      className="w-full rounded-xl border border-gray-700 bg-gray-900 px-4 py-2.5 text-sm outline-none focus:border-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label htmlFor="report-muni" className="mb-2 block text-xs font-semibold uppercase tracking-wider text-gray-400">
+                      Municipality
+                    </label>
+                    <input
+                      id="report-muni"
+                      type="text"
+                      value={municipality}
+                      onChange={(e) => setMunicipality(e.target.value)}
+                      placeholder="e.g. City of Johannesburg"
+                      className="w-full rounded-xl border border-gray-700 bg-gray-900 px-4 py-2.5 text-sm outline-none focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="grid gap-4 md:grid-cols-2">
+                <div>
+                  <label htmlFor="report-ward" className="mb-2 block text-sm font-semibold">Ward (Optional)</label>
+                  <input
+                    id="report-ward"
+                    type="text"
+                    value={ward}
+                    onChange={(e) => setWard(e.target.value)}
+                    placeholder="e.g. Ward 12"
+                    className="w-full rounded-xl border border-gray-700 bg-gray-950 px-4 py-3 outline-none focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="report-muni" className="mb-2 block text-sm font-semibold">Municipality (Optional)</label>
+                  <input
+                    id="report-muni"
+                    type="text"
+                    value={municipality}
+                    onChange={(e) => setMunicipality(e.target.value)}
+                    placeholder="e.g. City of Tshwane"
+                    className="w-full rounded-xl border border-gray-700 bg-gray-950 px-4 py-3 outline-none focus:border-blue-500"
+                  />
+                </div>
+              </div>
+            )}
 
             <div>
               <label className="mb-2 block text-sm font-semibold">Photo</label>

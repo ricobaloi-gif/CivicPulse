@@ -76,6 +76,12 @@ export default function NotificationsPage() {
         }
       }
 
+      // Navigate to invite if invite notification
+      if (notification.type === "invite") {
+        router.push("/organization/invites");
+        return;
+      }
+
       // Navigate to report if linked
       if (notification.reportId) {
         router.push(`/report/${notification.reportId}`);
