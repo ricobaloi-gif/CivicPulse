@@ -1,863 +1,128 @@
 "use client";
 
-import {
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
+import { useEffect, useState, useCallback } from "react";
+import { collection, query, where, orderBy, limit, getDocs, startAfter, QueryDocumentSnapshot, DocumentData } from "firebase/firestore";
+import { db } from "@/src/lib/firebase";
+import { useAuth } from "@/src/lib/AuthContext";
+import { Layout } from "@/src/components/Layout";
+import { ReportCard } from "@/src/components/ReportCard";
+import { ReportFilters } from "@/src/components/ReportFilters";
+import { EmptyState } from "@/src/components/EmptyState";
 
-import {
-  useRouter,
-} from "next/navigation";
-
-import {
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  query,
-  where,
-} from "firebase/firestore";
-
-import {
-  db,
-} from "@/src/lib/firebase";
-
-import {
-  useAuth,
-} from "@/src/lib/AuthContext";
-
-type UserProfile = {
-  uid?: string;
-  name?: string;
-  email?: string;
-  role?: string;
-
-  organizationId?: string | null;
-  organizationName?: string | null;
-};
-
-type Report = {
+interface BrowseReport {
   id: string;
-
-  title: string;
+  title?: string;
   description?: string;
-
-  category: string;
-  severity: string;
-  status: string;
-
+  category?: string;
+  severity?: string;
+  status?: string;
   confirmationCount?: number;
-
-  imageUrl?: string | null;
-
-  organizationId?: string | null;
-  organizationName?: string | null;
-};
-
-function getStatusLabel(
-  status: string
-) {
-  switch (status) {
-    case "submitted":
-      return "Submitted";
-
-    case "acknowledged":
-      return "Acknowledged";
-
-    case "assigned":
-      return "Assigned";
-
-    case "in-progress":
-      return "In Progress";
-
-    case "resolved":
-      return "Resolved";
-
-    case "reopened":
-      return "Reopened";
-
-    case "verified":
-      return "Verified";
-
-    case "rejected":
-      return "Rejected";
-
-    case "duplicate":
-      return "Duplicate";
-
-    default:
-      return status;
-  }
+  assignedToName?: string | null;
+  escalationLevel?: number;
+  createdAt?: { toDate(): Date } | null;
 }
 
-function getStatusClasses(
-  status: string
-) {
-  switch (status) {
-    case "submitted":
-      return "border-blue-800 bg-blue-950/40 text-blue-300";
-
-    case "acknowledged":
-      return "border-purple-800 bg-purple-950/40 text-purple-300";
-
-    case "assigned":
-      return "border-indigo-800 bg-indigo-950/40 text-indigo-300";
-
-    case "in-progress":
-      return "border-yellow-800 bg-yellow-950/40 text-yellow-300";
-
-    case "resolved":
-      return "border-green-800 bg-green-950/40 text-green-300";
-
-    case "reopened":
-      return "border-orange-800 bg-orange-950/40 text-orange-300";
-
-    case "rejected":
-      return "border-red-800 bg-red-950/40 text-red-300";
-
-    default:
-      return "border-gray-700 bg-gray-800 text-gray-300";
-  }
-}
-
-function getSeverityClasses(
-  severity: string
-) {
-  switch (severity) {
-    case "critical":
-      return "border-red-800 bg-red-950/40 text-red-300";
-
-    case "high":
-      return "border-orange-800 bg-orange-950/40 text-orange-300";
-
-    case "medium":
-      return "border-yellow-800 bg-yellow-950/40 text-yellow-300";
-
-    case "low":
-      return "border-green-800 bg-green-950/40 text-green-300";
-
-    default:
-      return "border-gray-700 bg-gray-800 text-gray-300";
-  }
-}
+const PAGE_SIZE = 20;
 
 export default function ReportsPage() {
-  const router =
-    useRouter();
+  const { user, profile } = useAuth();
+  const [reports, setReports] = useState<BrowseReport[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [lastDoc, setLastDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
+  const [hasMore, setHasMore] = useState(true);
+  const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
+  const [category, setCategory] = useState("");
+  const [severity, setSeverity] = useState("");
+  const [status, setStatus] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
 
-  const {
-    user,
-    loading: authLoading,
-  } = useAuth();
-
-  const [
-    profile,
-    setProfile,
-  ] =
-    useState<UserProfile | null>(
-      null
-    );
-
-  const [
-    reports,
-    setReports,
-  ] =
-    useState<Report[]>(
-      []
-    );
-
-  const [
-    loading,
-    setLoading,
-  ] =
-    useState(true);
-
-  const [
-    search,
-    setSearch,
-  ] =
-    useState("");
-
-  const [
-    categoryFilter,
-    setCategoryFilter,
-  ] =
-    useState("all");
-
-  const [
-    severityFilter,
-    setSeverityFilter,
-  ] =
-    useState("all");
-
-  const [
-    statusFilter,
-    setStatusFilter,
-  ] =
-    useState("all");
-
-  const [
-    error,
-    setError,
-  ] =
-    useState("");
-
-  async function loadData() {
-    if (!user) {
-      return;
-    }
-
-    const currentUser =
-      user;
-
+  const loadReports = useCallback(async (isMore = false) => {
+    if (!profile?.organizationId) return;
     try {
-      setLoading(true);
+      if (isMore) setLoadingMore(true); else setLoading(true);
       setError("");
 
-      const userRef =
-        doc(
-          db,
-          "users",
-          currentUser.uid
-        );
+      const q = isMore && lastDoc
+        ? query(collection(db, "reports"), where("organizationId", "==", profile.organizationId), orderBy("createdAt", "desc"), startAfter(lastDoc), limit(PAGE_SIZE))
+        : query(collection(db, "reports"), where("organizationId", "==", profile.organizationId), orderBy("createdAt", "desc"), limit(PAGE_SIZE));
+      const snapshot = await getDocs(q);
+      const items = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as BrowseReport));
 
-      const userSnapshot =
-        await getDoc(
-          userRef
-        );
-
-      if (
-        !userSnapshot.exists()
-      ) {
-        setError(
-          "Your CivicPulse profile could not be found."
-        );
-
-        return;
-      }
-
-      const currentProfile =
-        userSnapshot.data() as UserProfile;
-
-      setProfile(
-        currentProfile
-      );
-
-      if (
-        !currentProfile.organizationId
-      ) {
-        setReports([]);
-
-        return;
-      }
-
-      const reportsQuery =
-        query(
-          collection(
-            db,
-            "reports"
-          ),
-          where(
-            "organizationId",
-            "==",
-            currentProfile.organizationId
-          )
-        );
-
-      const snapshot =
-        await getDocs(
-          reportsQuery
-        );
-
-      const organizationReports: Report[] =
-        snapshot.docs.map(
-          (
-            reportDoc
-          ) => ({
-            id:
-              reportDoc.id,
-
-            ...(reportDoc.data() as Omit<
-              Report,
-              "id"
-            >),
-          })
-        );
-
-      setReports(
-        organizationReports
-      );
+      if (isMore) setReports((p) => [...p, ...items]); else setReports(items);
+      setLastDoc(snapshot.docs[snapshot.docs.length - 1] ?? null);
+      setHasMore(snapshot.docs.length === PAGE_SIZE);
     } catch (err) {
-      console.error(
-        "Browse reports error:",
-        err
-      );
-
-      setError(
-        "Unable to load organisation reports."
-      );
+      console.error("Browse reports error:", err);
+      setError("Failed to load reports.");
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
-  }
+  }, [profile, lastDoc]);
 
   useEffect(() => {
-    if (
-      authLoading
-    ) {
-      return;
+    if (profile?.organizationId) loadReports(false);
+    else setLoading(false);
+  }, [profile]);
+
+  // Client-side filtering
+  const filtered = reports.filter((r) => {
+    if (category && r.category !== category) return false;
+    if (severity && r.severity !== severity) return false;
+    if (status && r.status !== status) return false;
+    if (search) {
+      const t = search.toLowerCase();
+      if (!r.title?.toLowerCase().includes(t) && !r.description?.toLowerCase().includes(t)) return false;
     }
-
-    if (!user) {
-      router.replace(
-        "/login"
-      );
-
-      return;
+    if (dateFrom && r.createdAt) {
+      const d = "toDate" in r.createdAt ? r.createdAt.toDate() : r.createdAt;
+      if (d && d < new Date(dateFrom)) return false;
     }
+    if (dateTo && r.createdAt) {
+      const d = "toDate" in r.createdAt ? r.createdAt.toDate() : r.createdAt;
+      const end = new Date(dateTo);
+      end.setDate(end.getDate() + 1);
+      if (d && d > end) return false;
+    }
+    return true;
+  });
 
-    loadData();
-  }, [
-    user,
-    authLoading,
-  ]);
-
-  const categories =
-    useMemo(
-      () =>
-        Array.from(
-          new Set(
-            reports
-              .map(
-                (
-                  report
-                ) =>
-                  report.category
-              )
-              .filter(
-                Boolean
-              )
-          )
-        ).sort(),
-
-      [
-        reports,
-      ]
-    );
-
-  const filteredReports =
-    useMemo(
-      () => {
-        const normalizedSearch =
-          search
-            .trim()
-            .toLowerCase();
-
-        return reports.filter(
-          (
-            report
-          ) => {
-            if (
-              categoryFilter !==
-                "all" &&
-              report.category !==
-                categoryFilter
-            ) {
-              return false;
-            }
-
-            if (
-              severityFilter !==
-                "all" &&
-              report.severity !==
-                severityFilter
-            ) {
-              return false;
-            }
-
-            if (
-              statusFilter !==
-                "all" &&
-              report.status !==
-                statusFilter
-            ) {
-              return false;
-            }
-
-            if (
-              !normalizedSearch
-            ) {
-              return true;
-            }
-
-            const haystack =
-              [
-                report.title,
-                report.description,
-                report.category,
-                report.severity,
-                report.status,
-              ]
-                .filter(
-                  Boolean
-                )
-                .join(
-                  " "
-                )
-                .toLowerCase();
-
-            return haystack.includes(
-              normalizedSearch
-            );
-          }
-        );
-      },
-
-      [
-        reports,
-        search,
-        categoryFilter,
-        severityFilter,
-        statusFilter,
-      ]
-    );
-
-  if (
-    authLoading ||
-    loading
-  ) {
+  if (!profile?.organizationId) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-gray-950 text-white">
-        <div className="text-center">
-          <div className="mx-auto h-10 w-10 animate-spin rounded-full border-4 border-gray-700 border-t-purple-500" />
-
-          <p className="mt-4 text-gray-400">
-            Loading community reports...
-          </p>
-        </div>
-      </main>
-    );
-  }
-
-  if (!user) {
-    return null;
-  }
-
-  if (
-    !profile?.organizationId
-  ) {
-    return (
-      <main className="flex min-h-screen items-center justify-center bg-gray-950 p-6 text-white">
-        <div className="w-full max-w-lg rounded-2xl border border-gray-800 bg-gray-900 p-8 text-center">
-          <div className="text-5xl">
-            🏢
-          </div>
-
-          <h1 className="mt-5 text-3xl font-bold">
-            No Organisation
-          </h1>
-
-          <p className="mt-3 leading-7 text-gray-400">
-            Your CivicPulse account does not currently belong to an organisation.
-          </p>
-
-          <p className="mt-2 text-sm text-gray-500">
-            An organisation administrator needs to add your account before you can browse its community reports.
-          </p>
-
-          <button
-            type="button"
-            onClick={() =>
-              router.push(
-                "/dashboard"
-              )
-            }
-            className="mt-6 rounded-lg bg-blue-600 px-6 py-3 font-semibold hover:bg-blue-500"
-          >
-            Dashboard
-          </button>
-        </div>
-      </main>
+      <Layout title="Browse Reports">
+        <EmptyState icon="🏢" title="No Organisation" message="Join an organisation to browse community reports. Check your pending invitations or create a new organisation." />
+      </Layout>
     );
   }
 
   return (
-    <main className="min-h-screen bg-gray-950 text-white">
-      <div className="mx-auto max-w-7xl p-6 lg:p-8">
-        <header className="flex flex-col gap-5 border-b border-gray-800 pb-7 md:flex-row md:items-center md:justify-between">
-          <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-purple-400">
-              Community Reports
-            </p>
-
-            <h1 className="mt-2 text-3xl font-bold sm:text-4xl">
-              Browse Reports
-            </h1>
-
-            <p className="mt-2 text-gray-400">
-              Issues reported within{" "}
-              <span className="font-semibold text-gray-300">
-                {profile.organizationName ||
-                  "your organisation"}
-              </span>
-              .
-            </p>
-          </div>
-
-          <div className="flex flex-wrap gap-3">
-            <button
-              type="button"
-              onClick={() =>
-                router.push(
-                  "/report/new"
-                )
-              }
-              className="rounded-lg bg-blue-600 px-5 py-3 font-semibold hover:bg-blue-500"
-            >
-              + Report Issue
-            </button>
-
-            <button
-              type="button"
-              onClick={() =>
-                router.push(
-                  "/dashboard"
-                )
-              }
-              className="rounded-lg border border-gray-700 bg-gray-900 px-5 py-3 font-semibold hover:bg-gray-800"
-            >
-              Dashboard
-            </button>
-          </div>
-        </header>
-
-        {error && (
-          <div className="mt-6 rounded-xl border border-red-900 bg-red-950/30 p-4 text-red-300">
-            {
-              error
-            }
-          </div>
-        )}
-
-        <section className="mt-8 rounded-2xl border border-gray-800 bg-gray-900 p-5">
-          <div className="grid gap-4 lg:grid-cols-4">
-            <input
-              type="text"
-              value={
-                search
-              }
-              onChange={(
-                event
-              ) =>
-                setSearch(
-                  event.target.value
-                )
-              }
-              placeholder="Search reports..."
-              className="rounded-xl border border-gray-700 bg-gray-950 px-4 py-3 outline-none placeholder:text-gray-600 focus:border-purple-500"
-            />
-
-            <select
-              value={
-                categoryFilter
-              }
-              onChange={(
-                event
-              ) =>
-                setCategoryFilter(
-                  event.target.value
-                )
-              }
-              className="rounded-xl border border-gray-700 bg-gray-950 px-4 py-3 outline-none"
-            >
-              <option value="all">
-                All Categories
-              </option>
-
-              {categories.map(
-                (
-                  category
-                ) => (
-                  <option
-                    key={
-                      category
-                    }
-                    value={
-                      category
-                    }
-                  >
-                    {
-                      category
-                    }
-                  </option>
-                )
-              )}
-            </select>
-
-            <select
-              value={
-                severityFilter
-              }
-              onChange={(
-                event
-              ) =>
-                setSeverityFilter(
-                  event.target.value
-                )
-              }
-              className="rounded-xl border border-gray-700 bg-gray-950 px-4 py-3 outline-none capitalize"
-            >
-              <option value="all">
-                All Severities
-              </option>
-
-              <option value="critical">
-                Critical
-              </option>
-
-              <option value="high">
-                High
-              </option>
-
-              <option value="medium">
-                Medium
-              </option>
-
-              <option value="low">
-                Low
-              </option>
-            </select>
-
-            <select
-              value={
-                statusFilter
-              }
-              onChange={(
-                event
-              ) =>
-                setStatusFilter(
-                  event.target.value
-                )
-              }
-              className="rounded-xl border border-gray-700 bg-gray-950 px-4 py-3 outline-none"
-            >
-              <option value="all">
-                All Statuses
-              </option>
-
-              <option value="submitted">
-                Submitted
-              </option>
-
-              <option value="acknowledged">
-                Acknowledged
-              </option>
-
-              <option value="assigned">
-                Assigned
-              </option>
-
-              <option value="in-progress">
-                In Progress
-              </option>
-
-              <option value="resolved">
-                Resolved
-              </option>
-
-              <option value="reopened">
-                Reopened
-              </option>
-            </select>
-          </div>
-        </section>
-
-        <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
-          <p className="text-sm text-gray-500">
-            Showing{" "}
-            <span className="font-semibold text-gray-300">
-              {
-                filteredReports.length
-              }
-            </span>{" "}
-            of{" "}
-            <span className="font-semibold text-gray-300">
-              {
-                reports.length
-              }
-            </span>{" "}
-            reports
-          </p>
-
-          {(search ||
-            categoryFilter !==
-              "all" ||
-            severityFilter !==
-              "all" ||
-            statusFilter !==
-              "all") && (
-            <button
-              type="button"
-              onClick={() => {
-                setSearch("");
-                setCategoryFilter(
-                  "all"
-                );
-                setSeverityFilter(
-                  "all"
-                );
-                setStatusFilter(
-                  "all"
-                );
-              }}
-              className="text-sm font-semibold text-purple-400 hover:text-purple-300"
-            >
-              Clear Filters
-            </button>
-          )}
-        </div>
-
-        {reports.length ===
-        0 ? (
-          <div className="mt-8 rounded-2xl border border-dashed border-gray-700 p-12 text-center">
-            <div className="text-6xl">
-              📋
-            </div>
-
-            <h2 className="mt-5 text-2xl font-bold">
-              No reports yet
-            </h2>
-
-            <p className="mt-2 text-gray-500">
-              Be the first person in this organisation to report a community issue.
-            </p>
-
-            <button
-              type="button"
-              onClick={() =>
-                router.push(
-                  "/report/new"
-                )
-              }
-              className="mt-6 rounded-lg bg-blue-600 px-6 py-3 font-semibold hover:bg-blue-500"
-            >
-              Report an Issue
-            </button>
-          </div>
-        ) : filteredReports.length ===
-          0 ? (
-          <div className="mt-8 rounded-2xl border border-dashed border-gray-700 p-12 text-center">
-            <div className="text-5xl">
-              🔎
-            </div>
-
-            <h2 className="mt-4 text-xl font-bold">
-              No matching reports
-            </h2>
-
-            <p className="mt-2 text-gray-500">
-              Try changing your search or filters.
-            </p>
-          </div>
-        ) : (
-          <section className="mt-8 grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-            {filteredReports.map(
-              (
-                report
-              ) => (
-                <button
-                  key={
-                    report.id
-                  }
-                  type="button"
-                  onClick={() =>
-                    router.push(
-                      `/report/${report.id}`
-                    )
-                  }
-                  className="overflow-hidden rounded-2xl border border-gray-800 bg-gray-900 text-left transition hover:-translate-y-0.5 hover:border-purple-600"
-                >
-                  {report.imageUrl ? (
-                    <img
-                      src={
-                        report.imageUrl
-                      }
-                      alt={
-                        report.title
-                      }
-                      className="h-48 w-full object-cover"
-                    />
-                  ) : (
-                    <div className="flex h-48 items-center justify-center bg-gray-950 text-5xl">
-                      📍
-                    </div>
-                  )}
-
-                  <div className="p-6">
-                    <div className="flex flex-wrap gap-2">
-                      <span className="rounded-full border border-gray-700 bg-gray-950 px-3 py-1 text-xs text-gray-300">
-                        {
-                          report.category
-                        }
-                      </span>
-
-                      <span
-                        className={`rounded-full border px-3 py-1 text-xs font-semibold capitalize ${getSeverityClasses(
-                          report.severity
-                        )}`}
-                      >
-                        {
-                          report.severity
-                        }
-                      </span>
-
-                      <span
-                        className={`rounded-full border px-3 py-1 text-xs font-semibold ${getStatusClasses(
-                          report.status
-                        )}`}
-                      >
-                        {getStatusLabel(
-                          report.status
-                        )}
-                      </span>
-                    </div>
-
-                    <h2 className="mt-4 text-xl font-bold">
-                      {
-                        report.title
-                      }
-                    </h2>
-
-                    {report.description && (
-                      <p className="mt-2 line-clamp-3 text-sm leading-6 text-gray-400">
-                        {
-                          report.description
-                        }
-                      </p>
-                    )}
-
-                    <div className="mt-5 flex items-center justify-between border-t border-gray-800 pt-4">
-                      <p className="text-sm text-gray-500">
-                        ✅{" "}
-                        {
-                          report.confirmationCount ??
-                          0
-                        }{" "}
-                        confirmations
-                      </p>
-
-                      <span className="font-semibold text-purple-400">
-                        View →
-                      </span>
-                    </div>
-                  </div>
-                </button>
-              )
-            )}
-          </section>
-        )}
+    <Layout title="Browse Reports">
+      <div className="mb-6">
+        <ReportFilters search={search} onSearchChange={setSearch} category={category} onCategoryChange={setCategory} severity={severity} onSeverityChange={setSeverity} status={status} onStatusChange={setStatus} showDateFilter dateFrom={dateFrom} dateTo={dateTo} onDateFromChange={setDateFrom} onDateToChange={setDateTo} />
       </div>
-    </main>
+
+      {error && <div className="mb-4 rounded-xl border border-red-900 bg-red-950/30 p-4 text-red-300">{error}</div>}
+
+      {loading ? (
+        <div className="flex justify-center py-16"><div className="h-8 w-8 animate-spin rounded-full border-4 border-gray-700 border-t-blue-500" /></div>
+      ) : filtered.length === 0 ? (
+        <EmptyState icon="📋" title={reports.length === 0 ? "No reports yet" : "No matching reports"} message={reports.length === 0 ? "Be the first to report an issue in your community." : "Try adjusting your filters."} />
+      ) : (
+        <div className="space-y-3">
+          {filtered.map((r) => <ReportCard key={r.id} report={r} />)}
+        </div>
+      )}
+
+      {hasMore && !loading && reports.length > 0 && (
+        <div className="mt-6 text-center">
+          <button type="button" onClick={() => loadReports(true)} disabled={loadingMore} className="rounded-lg border border-gray-700 bg-gray-900 px-6 py-2.5 text-sm font-medium hover:bg-gray-800 disabled:opacity-50">
+            {loadingMore ? "Loading..." : "Load More"}
+          </button>
+        </div>
+      )}
+    </Layout>
   );
 }
