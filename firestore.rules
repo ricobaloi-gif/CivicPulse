@@ -84,10 +84,9 @@ service cloud.firestore {
     }
 
     function canReadReport(report) {
-      return isAuthenticated() && (
-        isReportCreator(report) ||
-        (report.data.organizationId != null && sameOrg(report.data.organizationId) && (isStaff() || isOrgMember()))
-      );
+      return isAuthenticated() &&
+        report.data.organizationId != null &&
+        sameOrg(report.data.organizationId);
     }
 
     function isSelfProfile(userId) {
@@ -179,16 +178,16 @@ service cloud.firestore {
         request.resource.data.escalated == false;
 
       // Read access: creator, org staff/admin, org members (for browsing)
-      allow read: if isAuthenticated() && canReadReport(this);
+      allow read: if isAuthenticated() && canReadReport(resource);
 
       // Update: creator can confirm, staff/admin can manage assigned cases
       allow update: if isAuthenticated() && (
         // Creator can confirm (increment confirmationCount, add to confirmedBy)
-        (isReportCreator(this) &&
+        (isReportCreator(resource) &&
          request.resource.data.diff(resource.data).affectedKeys()
            .hasOnly(['confirmationCount', 'confirmedBy', 'updatedAt'])) ||
         // Staff/Admin can manage their assigned cases
-        (canManageReport(this) &&
+        (canManageReport(resource) &&
          request.resource.data.diff(resource.data).affectedKeys()
            .hasOnly([
              'status', 'statusHistory', 'assignedTo', 'assignedToName', 'assignedAt',
