@@ -270,6 +270,7 @@ export default function AdminPage() {
             {[
               { href: "/organization/manage", label: "Members & Invites", icon: "👥" },
               { href: "/organization/areas", label: "Wards & Areas", icon: "📍" },
+              { href: "/organization/api", label: "API Keys", icon: "🔑" },
               { href: "/map", label: "Map View", icon: "🗺️" },
               { href: "/reports", label: "Public Reports", icon: "📋" },
             ].map((a) => (

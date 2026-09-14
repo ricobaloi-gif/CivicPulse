@@ -345,6 +345,13 @@ export default function OrganizationManagePage() {
             >
               📍 Manage Areas
             </button>
+            <button
+              type="button"
+              onClick={() => router.push("/organization/api")}
+              className="rounded-lg border border-gray-700 bg-gray-900 px-4 py-2 text-sm font-semibold hover:bg-gray-800"
+            >
+              🔑 API Keys
+            </button>
           </div>
         </div>
 
