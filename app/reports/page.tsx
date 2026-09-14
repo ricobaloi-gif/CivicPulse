@@ -49,7 +49,6 @@ export default function ReportsPage() {
   const [hasMore, setHasMore] = useState(true);
   const [error, setError] = useState("");
 
-  // Filters
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("");
   const [severity, setSeverity] = useState("");
@@ -60,7 +59,6 @@ export default function ReportsPage() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
 
-  // Load areas for the organisation
   useEffect(() => {
     if (!profile?.organizationId) return;
 
@@ -129,26 +127,22 @@ export default function ReportsPage() {
     else setLoading(false);
   }, [profile?.organizationId]);
 
-  // Client-side filtering
   const filtered = useMemo(() => {
     return reports.filter((r) => {
       if (category && r.category !== category) return false;
       if (severity && r.severity !== severity) return false;
       if (status && r.status !== status) return false;
 
-      // Area filter
       if (areaId) {
         const matchesId = r.areaId === areaId;
         const matchesName = r.areaName?.toLowerCase() === areaId.toLowerCase();
         if (!matchesId && !matchesName) return false;
       }
 
-      // Ward filter
       if (ward && !r.ward?.toLowerCase().includes(ward.toLowerCase().trim())) {
         return false;
       }
 
-      // Municipality filter
       if (
         municipality &&
         !r.municipality?.toLowerCase().includes(municipality.toLowerCase().trim())
@@ -156,7 +150,6 @@ export default function ReportsPage() {
         return false;
       }
 
-      // Search matching report ID, title, description, ward
       if (search.trim()) {
         const t = search.toLowerCase().trim();
         const idMatch = r.id.toLowerCase().includes(t);
@@ -169,7 +162,6 @@ export default function ReportsPage() {
         }
       }
 
-      // Date filtering
       if (dateFrom && r.createdAt) {
         const d = "toDate" in r.createdAt ? r.createdAt.toDate() : r.createdAt;
         if (d && d < new Date(dateFrom)) return false;
@@ -200,7 +192,7 @@ export default function ReportsPage() {
     return (
       <Layout title="Browse Reports">
         <EmptyState
-          icon="🏢"
+          icon="org"
           title="No Organisation"
           message="Join an organisation to browse community reports. Check your pending invitations or create a new organisation."
         />
@@ -236,18 +228,18 @@ export default function ReportsPage() {
       </div>
 
       {error && (
-        <div className="mb-4 rounded-xl border border-red-900 bg-red-950/30 p-4 text-red-300">
+        <div className="mb-4 rounded-xl border border-danger/30 bg-danger-muted/30 p-4 text-danger">
           {error}
         </div>
       )}
 
       {loading ? (
         <div className="flex justify-center py-16">
-          <div className="h-8 w-8 animate-spin rounded-full border-4 border-gray-700 border-t-blue-500" />
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-border border-t-primary" />
         </div>
       ) : filtered.length === 0 ? (
         <EmptyState
-          icon="📋"
+          icon="reports"
           title={reports.length === 0 ? "No reports yet" : "No matching reports"}
           message={
             reports.length === 0
@@ -257,7 +249,7 @@ export default function ReportsPage() {
         />
       ) : (
         <div className="space-y-3">
-          <div className="flex items-center justify-between text-xs text-gray-500 px-1">
+          <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
             <span>Showing {filtered.length} report{filtered.length !== 1 ? "s" : ""}</span>
           </div>
           {filtered.map((r) => (
@@ -272,7 +264,7 @@ export default function ReportsPage() {
             type="button"
             onClick={() => loadReports(true)}
             disabled={loadingMore}
-            className="rounded-lg border border-gray-700 bg-gray-900 px-6 py-2.5 text-sm font-medium hover:bg-gray-800 disabled:opacity-50"
+            className="btn-secondary"
           >
             {loadingMore ? "Loading..." : "Load More"}
           </button>

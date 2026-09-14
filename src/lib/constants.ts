@@ -19,7 +19,7 @@ export const CATEGORIES: ReportCategory[] = [
   "Other",
 ];
 
-// ─── Category Emoji Map ─────────────────────────────────
+// ─── Category Emoji Map (KEEP FOR MAP MARKERS) ──────────
 
 export const CATEGORY_EMOJI: Record<string, string> = {
   Pothole: "🕳️",
@@ -46,15 +46,15 @@ export const SEVERITIES: ReportSeverity[] = [
 
 export const SEVERITY_COLORS: Record<string, { bg: string; text: string; border: string; marker: string }> = {
   critical: {
-    bg: "bg-red-950/50",
-    text: "text-red-300",
-    border: "border-red-800",
+    bg: "bg-danger-muted",
+    text: "text-danger",
+    border: "border-danger/30",
     marker: "#ef4444",
   },
   high: {
-    bg: "bg-orange-950/50",
-    text: "text-orange-300",
-    border: "border-orange-800",
+    bg: "bg-warning-muted",
+    text: "text-warning",
+    border: "border-warning/30",
     marker: "#f97316",
   },
   medium: {
@@ -64,9 +64,9 @@ export const SEVERITY_COLORS: Record<string, { bg: string; text: string; border:
     marker: "#eab308",
   },
   low: {
-    bg: "bg-green-950/50",
-    text: "text-green-300",
-    border: "border-green-800",
+    bg: "bg-success-muted",
+    text: "text-success",
+    border: "border-success/30",
     marker: "#22c55e",
   },
 };
@@ -87,69 +87,60 @@ export const STATUSES: ReportStatus[] = [
 
 // ─── Status Display Configuration ───────────────────────
 
-export const STATUS_CONFIG: Record<string, { label: string; bg: string; text: string; border: string; icon: string }> = {
+export const STATUS_CONFIG: Record<string, { label: string; bg: string; text: string; border: string }> = {
   submitted: {
     label: "Submitted",
-    bg: "bg-blue-950/50",
-    text: "text-blue-300",
-    border: "border-blue-800",
-    icon: "📥",
+    bg: "bg-primary-muted",
+    text: "text-primary",
+    border: "border-primary/30",
   },
   acknowledged: {
     label: "Acknowledged",
     bg: "bg-sky-950/50",
     text: "text-sky-300",
     border: "border-sky-800",
-    icon: "👁️",
   },
   assigned: {
     label: "Assigned",
     bg: "bg-indigo-950/50",
     text: "text-indigo-300",
     border: "border-indigo-800",
-    icon: "👤",
   },
   "in-progress": {
     label: "In Progress",
     bg: "bg-purple-950/50",
     text: "text-purple-300",
     border: "border-purple-800",
-    icon: "🔧",
   },
   resolved: {
     label: "Resolved",
-    bg: "bg-green-950/50",
-    text: "text-green-300",
-    border: "border-green-800",
-    icon: "✅",
+    bg: "bg-success-muted",
+    text: "text-success",
+    border: "border-success/30",
   },
   reopened: {
     label: "Reopened",
-    bg: "bg-amber-950/50",
-    text: "text-amber-300",
-    border: "border-amber-800",
-    icon: "🔄",
+    bg: "bg-warning-muted",
+    text: "text-warning",
+    border: "border-warning/30",
   },
   verified: {
     label: "Verified",
     bg: "bg-emerald-950/50",
     text: "text-emerald-300",
     border: "border-emerald-800",
-    icon: "✔️",
   },
   rejected: {
     label: "Rejected",
-    bg: "bg-red-950/50",
-    text: "text-red-300",
-    border: "border-red-800",
-    icon: "❌",
+    bg: "bg-danger-muted",
+    text: "text-danger",
+    border: "border-danger/30",
   },
   duplicate: {
     label: "Duplicate",
-    bg: "bg-gray-800/50",
-    text: "text-gray-300",
-    border: "border-gray-700",
-    icon: "📋",
+    bg: "bg-surface-elevated",
+    text: "text-muted-foreground",
+    border: "border-border",
   },
 };
 
@@ -189,19 +180,19 @@ export const ORGANIZATION_TYPES: OrganizationType[] = [
   "Other",
 ];
 
-// ─── Notification Type Icons ────────────────────────────
+// ─── Notification Type Icons (No emojis - use Lucide icons instead) ───────
 
-export const NOTIFICATION_ICONS: Record<string, string> = {
-  status: "📋",
-  assignment: "👤",
-  comment: "💬",
-  confirmation: "👍",
-  escalation: "🔺",
-  dispute: "⚖️",
-  resolution: "✅",
-  invite: "📨",
-  "sla-warning": "⏰",
-  system: "🔔",
+export const NOTIFICATION_TYPES: Record<string, string> = {
+  status: "status",
+  assignment: "assignment",
+  comment: "comment",
+  confirmation: "confirmation",
+  escalation: "escalation",
+  dispute: "dispute",
+  resolution: "resolution",
+  invite: "invite",
+  "sla-warning": "sla-warning",
+  system: "system",
 };
 
 // ─── Escalation Levels ──────────────────────────────────
@@ -428,7 +419,6 @@ export function getGeohashRange(
   longitude: number,
   radiusMeters: number
 ): { lower: string; upper: string } {
-  // Use precision based on radius
   let precision = 7;
   if (radiusMeters > 5000) precision = 4;
   else if (radiusMeters > 1000) precision = 5;
@@ -436,7 +426,6 @@ export function getGeohashRange(
 
   const hash = encodeGeohash(latitude, longitude, precision);
 
-  // Simple range: get the geohash and create a range that covers nearby cells
   const lower = hash;
   const upper = hash.slice(0, -1) + BASE32[BASE32.indexOf(hash.slice(-1)) + 1] || hash + "~";
 
@@ -468,7 +457,6 @@ export function compressImage(
       let width = img.width;
       let height = img.height;
 
-      // Scale down if wider than maxWidth
       if (width > maxWidth) {
         height = Math.round((height * maxWidth) / width);
         width = maxWidth;

@@ -9,9 +9,9 @@ interface SeverityBadgeProps {
 
 export function SeverityBadge({ severity, size = "sm" }: SeverityBadgeProps) {
   const colors = SEVERITY_COLORS[severity] ?? {
-    bg: "bg-gray-800/50",
-    text: "text-gray-300",
-    border: "border-gray-700",
+    bg: "bg-surface-elevated",
+    text: "text-muted-foreground",
+    border: "border-border",
   };
 
   const sizeClasses =

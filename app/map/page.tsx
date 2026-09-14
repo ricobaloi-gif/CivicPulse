@@ -33,6 +33,8 @@ import {
   useAuth,
 } from "@/src/lib/AuthContext";
 
+import { MapPin, Search, Filter, X, Layers, Navigation, Locate, Plus, LayoutDashboard } from "lucide-react";
+
 type UserProfile = {
   uid?: string;
   name?: string;
@@ -708,6 +710,7 @@ export default function MapPage() {
 
         popupContainer.style.color =
           "#111827";
+        popupContainer.style.fontFamily = "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
 
         const titleElement =
           document.createElement(
@@ -806,6 +809,7 @@ export default function MapPage() {
         linkButton.style.fontWeight =
           "600";
 
+        linkButton.style.border = "none";
         linkButton.style.cursor =
           "pointer";
 
@@ -1061,11 +1065,11 @@ export default function MapPage() {
     loading
   ) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-gray-950 text-white">
+      <main className="flex min-h-screen items-center justify-center bg-background text-foreground">
         <div className="text-center">
-          <div className="mx-auto h-10 w-10 animate-spin rounded-full border-4 border-gray-700 border-t-orange-500" />
+          <div className="mx-auto h-10 w-10 animate-spin rounded-full border-4 border-border border-t-primary" />
 
-          <p className="mt-4 text-gray-400">
+          <p className="mt-4 text-muted-foreground">
             Loading community map...
           </p>
         </div>
@@ -1081,17 +1085,17 @@ export default function MapPage() {
     !profile?.organizationId
   ) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-gray-950 p-6 text-white">
-        <div className="w-full max-w-lg rounded-2xl border border-gray-800 bg-gray-900 p-8 text-center">
-          <div className="text-5xl">
-            🏢
+      <main className="flex min-h-screen items-center justify-center bg-background p-6 text-foreground">
+        <div className="w-full max-w-lg rounded-2xl border border-border bg-surface p-8 text-center">
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-primary-muted">
+            <MapPin className="h-8 w-8 text-primary" />
           </div>
 
           <h1 className="mt-5 text-3xl font-bold">
             No Organisation
           </h1>
 
-          <p className="mt-3 leading-7 text-gray-400">
+          <p className="mt-3 leading-7 text-muted-foreground">
             Your account must belong to an organisation before you can access its community map.
           </p>
 
@@ -1102,7 +1106,7 @@ export default function MapPage() {
                 "/dashboard"
               )
             }
-            className="mt-6 rounded-lg bg-blue-600 px-6 py-3 font-semibold hover:bg-blue-500"
+            className="mt-6 btn-primary"
           >
             Dashboard
           </button>
@@ -1121,11 +1125,11 @@ export default function MapPage() {
       "all";
 
   return (
-    <main className="min-h-screen bg-gray-950 text-white">
+    <main className="min-h-screen bg-background text-foreground">
       <div className="mx-auto max-w-7xl p-6 lg:p-8">
-        <header className="flex flex-col gap-5 border-b border-gray-800 pb-7 lg:flex-row lg:items-center lg:justify-between">
+        <header className="flex flex-col gap-5 border-b border-border pb-7 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-orange-400">
+            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-primary">
               Community Map
             </p>
 
@@ -1136,7 +1140,7 @@ export default function MapPage() {
               }
             </h1>
 
-            <p className="mt-2 text-gray-400">
+            <p className="mt-2 text-muted-foreground">
               Explore reported issues across your organisation.
             </p>
           </div>
@@ -1150,11 +1154,10 @@ export default function MapPage() {
               disabled={
                 locating
               }
-              className="rounded-lg border border-blue-800 bg-blue-950/30 px-4 py-3 font-semibold text-blue-300 hover:bg-blue-950 disabled:opacity-50"
+              className="btn-secondary"
             >
-              {locating
-                ? "Locating..."
-                : "📍 Find My Location"}
+              <Locate className="h-4 w-4" />
+              <span>{locating ? "Locating..." : "Find My Location"}</span>
             </button>
 
             <button
@@ -1164,9 +1167,10 @@ export default function MapPage() {
                   "/report/new"
                 )
               }
-              className="rounded-lg border border-gray-700 bg-gray-900 px-4 py-3 font-semibold hover:bg-gray-800"
+              className="btn-secondary"
             >
-              + Report Issue
+              <Plus className="h-4 w-4" />
+              <span>Report Issue</span>
             </button>
 
             <button
@@ -1176,38 +1180,42 @@ export default function MapPage() {
                   "/dashboard"
                 )
               }
-              className="rounded-lg bg-blue-600 px-4 py-3 font-semibold hover:bg-blue-500"
+              className="btn-primary"
             >
-              Dashboard
+              <LayoutDashboard className="h-4 w-4" />
+              <span>Dashboard</span>
             </button>
           </div>
         </header>
 
         {error && (
-          <div className="mt-6 rounded-xl border border-red-900 bg-red-950/30 p-4 text-red-300">
+          <div className="mt-6 rounded-xl border border-danger/30 bg-danger-muted/30 p-4 text-danger">
             {
               error
             }
           </div>
         )}
 
-        <section className="mt-6 rounded-2xl border border-gray-800 bg-gray-900 p-5">
+        <section className="mt-6 card">
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <input
-              type="text"
-              value={
-                search
-              }
-              onChange={(
-                event
-              ) =>
-                setSearch(
-                  event.target.value
-                )
-              }
-              placeholder="Search map..."
-              className="rounded-xl border border-gray-700 bg-gray-950 px-4 py-3 outline-none placeholder:text-gray-600 focus:border-orange-500"
-            />
+            <div className="relative">
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <input
+                type="text"
+                value={
+                  search
+                }
+                onChange={(
+                  event
+                ) =>
+                  setSearch(
+                    event.target.value
+                  )
+                }
+                placeholder="Search map..."
+                className="input pl-10"
+              />
+            </div>
 
             <select
               value={
@@ -1220,7 +1228,7 @@ export default function MapPage() {
                   event.target.value
                 )
               }
-              className="rounded-xl border border-gray-700 bg-gray-950 px-4 py-3 outline-none"
+              className="input"
             >
               <option value="all">
                 All Categories
@@ -1257,7 +1265,7 @@ export default function MapPage() {
                   event.target.value
                 )
               }
-              className="rounded-xl border border-gray-700 bg-gray-950 px-4 py-3 outline-none"
+              className="input"
             >
               <option value="all">
                 All Severities
@@ -1291,7 +1299,7 @@ export default function MapPage() {
                   event.target.value
                 )
               }
-              className="rounded-xl border border-gray-700 bg-gray-950 px-4 py-3 outline-none"
+              className="input"
             >
               <option value="all">
                 All Statuses
@@ -1324,15 +1332,15 @@ export default function MapPage() {
           </div>
 
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-            <p className="text-sm text-gray-500">
+            <p className="text-sm text-muted-foreground">
               Showing{" "}
-              <span className="font-semibold text-gray-300">
+              <span className="font-semibold text-foreground">
                 {
                   filteredReports.length
                 }
               </span>{" "}
               of{" "}
-              <span className="font-semibold text-gray-300">
+              <span className="font-semibold text-foreground">
                 {
                   reports.length
                 }
@@ -1346,7 +1354,7 @@ export default function MapPage() {
                 onClick={
                   clearFilters
                 }
-                className="text-sm font-semibold text-orange-400 hover:text-orange-300"
+                className="text-sm font-semibold text-primary hover:underline"
               >
                 Clear Filters
               </button>
@@ -1354,7 +1362,7 @@ export default function MapPage() {
           </div>
         </section>
 
-        <section className="mt-6 overflow-hidden rounded-2xl border border-gray-800 bg-gray-900">
+        <section className="mt-6 overflow-hidden rounded-2xl border border-border bg-surface">
           <div
             ref={
               mapContainerRef
@@ -1363,47 +1371,29 @@ export default function MapPage() {
           />
         </section>
 
-        <section className="mt-6 rounded-2xl border border-gray-800 bg-gray-900 p-5">
-          <p className="text-sm font-semibold uppercase tracking-wider text-gray-400">
+        <section className="mt-6 card">
+          <p className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
             Map Legend
           </p>
 
-          <div className="mt-4 flex flex-wrap gap-4 text-sm text-gray-300">
-            <span>
-              🕳️ Pothole
-            </span>
+          <div className="mt-4 flex flex-wrap gap-4 text-sm text-muted-foreground">
+            <span>🕳️ Pothole</span>
 
-            <span>
-              💧 Water Leak
-            </span>
+            <span>💧 Water Leak</span>
 
-            <span>
-              ⚡ Power Outage
-            </span>
+            <span>⚡ Power Outage</span>
 
-            <span>
-              💡 Streetlight
-            </span>
+            <span>💡 Streetlight</span>
 
-            <span>
-              ⚠️ Dumping
-            </span>
+            <span>⚠️ Dumping</span>
 
-            <span>
-              🚧 Road Hazard
-            </span>
+            <span>🚧 Road Hazard</span>
 
-            <span>
-              ☣️ Sewer
-            </span>
+            <span>☣️ Sewer</span>
 
-            <span>
-              🧱 Vandalism
-            </span>
+            <span>🧱 Vandalism</span>
 
-            <span>
-              📍 Other
-            </span>
+            <span>📍 Other</span>
           </div>
 
           <div className="mt-5 flex flex-wrap gap-4 text-sm">

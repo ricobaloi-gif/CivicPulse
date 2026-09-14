@@ -46,7 +46,6 @@ export default function MyReportsPage() {
   const [hasMore, setHasMore] = useState(true);
   const [error, setError] = useState("");
 
-  // Filters
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("");
   const [severity, setSeverity] = useState("");
@@ -136,7 +135,6 @@ export default function MyReportsPage() {
     profile?.organizationId,
   ]);
 
-  // Client-side filtering
   const filtered = reports.filter((report) => {
     if (category && report.category !== category) {
       return false;
@@ -177,7 +175,7 @@ export default function MyReportsPage() {
     return (
       <Layout title="My Reports">
         <EmptyState
-          icon="🏢"
+          icon="org"
           title="No Organisation"
           message="Join an organisation before viewing organisation reports."
         />
@@ -188,7 +186,7 @@ export default function MyReportsPage() {
   return (
     <Layout title="My Reports">
       {error && (
-        <div className="mb-6 rounded-xl border border-red-900 bg-red-950/30 p-4 text-red-300">
+        <div className="mb-6 rounded-xl border border-danger/30 bg-danger-muted/30 p-4 text-danger">
           {error}
         </div>
       )}
@@ -208,11 +206,11 @@ export default function MyReportsPage() {
 
       {loading ? (
         <div className="flex justify-center py-16">
-          <div className="h-8 w-8 animate-spin rounded-full border-4 border-gray-700 border-t-blue-500" />
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-border border-t-primary" />
         </div>
       ) : filtered.length === 0 ? (
         <EmptyState
-          icon="📄"
+          icon="folder"
           title={
             reports.length === 0
               ? "No reports yet"
@@ -243,7 +241,7 @@ export default function MyReportsPage() {
               type="button"
               onClick={() => loadReports(true)}
               disabled={loadingMore}
-              className="rounded-lg border border-gray-700 bg-gray-900 px-6 py-2.5 text-sm font-medium hover:bg-gray-800 disabled:opacity-50"
+              className="btn-secondary"
             >
               {loadingMore
                 ? "Loading..."

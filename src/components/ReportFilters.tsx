@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { CATEGORIES, SEVERITIES, STATUSES } from "@/src/lib/constants";
 import type { ReactNode } from "react";
+import { Filter, X, SlidersHorizontal } from "lucide-react";
 
 export interface StaffOption {
   uid: string;
@@ -28,39 +29,28 @@ export interface ReportFiltersProps {
   status: string;
   onStatusChange: (value: string) => void;
 
-  // Assigned staff filter
   assignedStaff?: string;
   onAssignedStaffChange?: (value: string) => void;
   staffList?: StaffOption[];
 
-  // Area / Ward filter
   areaId?: string;
   onAreaIdChange?: (value: string) => void;
   areaList?: AreaOption[];
   ward?: string;
   onWardChange?: (value: string) => void;
 
-  // Municipality filter
   municipality?: string;
   onMunicipalityChange?: (value: string) => void;
 
-  // Date range filters
   showDateFilter?: boolean;
   dateFrom?: string;
   dateTo?: string;
   onDateFromChange?: (value: string) => void;
   onDateToChange?: (value: string) => void;
 
-  // Optional reset handler
   onReset?: () => void;
   extraFilters?: ReactNode;
 }
-
-const selectClass =
-  "rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white outline-none focus:border-blue-500";
-
-const inputClass =
-  "w-full rounded-lg border border-gray-700 bg-gray-800 px-4 py-2.5 text-sm text-white outline-none focus:border-blue-500 placeholder:text-gray-500";
 
 export function ReportFilters({
   search,
@@ -124,19 +114,16 @@ export function ReportFilters({
   }
 
   return (
-    <div className="space-y-3 rounded-2xl border border-gray-800 bg-gray-900/60 p-4">
-      {/* Search bar */}
+    <div className="card">
       <div className="flex flex-col gap-2 sm:flex-row">
         <div className="relative flex-1">
-          <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-500">
-            🔍
-          </span>
+          <Filter className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <input
             type="text"
             value={search}
             onChange={(e) => onSearchChange(e.target.value)}
             placeholder="Search by report ID, title, or description..."
-            className={`${inputClass} pl-10`}
+            className="input pl-10"
             aria-label="Search reports"
           />
         </div>
@@ -145,15 +132,16 @@ export function ReportFilters({
           <button
             type="button"
             onClick={() => setShowAdvanced(!showAdvanced)}
-            className={`flex items-center justify-center gap-1.5 rounded-lg border px-3.5 py-2 text-xs font-semibold transition ${
+            className={`inline-flex items-center justify-center gap-1.5 rounded-lg border px-3.5 py-2 text-xs font-semibold transition ${
               showAdvanced || activeFilterCount > 0
-                ? "border-blue-700 bg-blue-950/40 text-blue-300"
-                : "border-gray-700 bg-gray-800 text-gray-300 hover:bg-gray-750"
+                ? "border-primary/30 bg-primary-muted text-primary"
+                : "border-border bg-surface-elevated text-muted-foreground hover:bg-surface-hover hover:text-foreground"
             }`}
           >
-            <span>⚙️ Filters</span>
+            <SlidersHorizontal className="h-3.5 w-3.5" />
+            <span>Filters</span>
             {activeFilterCount > 0 && (
-              <span className="rounded-full bg-blue-600 px-1.5 py-0.2 text-[10px] text-white">
+              <span className="rounded-full bg-primary px-1.5 py-0.2 text-[10px] text-white">
                 {activeFilterCount}
               </span>
             )}
@@ -164,19 +152,19 @@ export function ReportFilters({
           <button
             type="button"
             onClick={handleResetAll}
-            className="rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-xs font-medium text-gray-400 hover:text-white"
+            className="btn-secondary btn-sm"
           >
-            Clear
+            <X className="h-3.5 w-3.5" />
+            <span>Clear</span>
           </button>
         )}
       </div>
 
-      {/* Primary filters */}
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="mt-3 flex flex-wrap items-center gap-2">
         <select
           value={category}
           onChange={(e) => onCategoryChange(e.target.value)}
-          className={selectClass}
+          className="select"
           aria-label="Filter by category"
         >
           <option value="">All Categories</option>
@@ -190,7 +178,7 @@ export function ReportFilters({
         <select
           value={severity}
           onChange={(e) => onSeverityChange(e.target.value)}
-          className={`${selectClass} capitalize`}
+          className="select capitalize"
           aria-label="Filter by severity"
         >
           <option value="">All Severities</option>
@@ -204,7 +192,7 @@ export function ReportFilters({
         <select
           value={status}
           onChange={(e) => onStatusChange(e.target.value)}
-          className={selectClass}
+          className="select"
           aria-label="Filter by status"
         >
           <option value="">All Statuses</option>
@@ -218,19 +206,15 @@ export function ReportFilters({
         {extraFilters}
       </div>
 
-      {/* Advanced filters dropdown area */}
       {(showAdvanced || activeFilterCount > 3) && hasAdvancedControls && (
-        <div className="mt-3 grid gap-3 border-t border-gray-800/80 pt-3 sm:grid-cols-2 lg:grid-cols-4">
-          {/* Assigned Staff Filter */}
+        <div className="mt-3 grid gap-3 border-t border-border/80 pt-3 sm:grid-cols-2 lg:grid-cols-4">
           {onAssignedStaffChange && (
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-400">
-                Assigned Staff
-              </label>
+              <label className="label">Assigned Staff</label>
               <select
                 value={assignedStaff}
                 onChange={(e) => onAssignedStaffChange(e.target.value)}
-                className={`w-full ${selectClass}`}
+                className="select"
                 aria-label="Filter by assigned staff"
               >
                 <option value="">All Staff / Unassigned</option>
@@ -244,16 +228,13 @@ export function ReportFilters({
             </div>
           )}
 
-          {/* Area / Ward Filter */}
           {onAreaIdChange && areaList && (
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-400">
-                Service Area / Ward
-              </label>
+              <label className="label">Service Area / Ward</label>
               <select
                 value={areaId}
                 onChange={(e) => onAreaIdChange(e.target.value)}
-                className={`w-full ${selectClass}`}
+                className="select"
                 aria-label="Filter by service area"
               >
                 <option value="">All Service Areas</option>
@@ -266,64 +247,53 @@ export function ReportFilters({
             </div>
           )}
 
-          {/* Ward Manual / Code filter */}
           {onWardChange && !areaList && (
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-400">
-                Ward
-              </label>
+              <label className="label">Ward</label>
               <input
                 type="text"
                 value={ward}
                 onChange={(e) => onWardChange(e.target.value)}
                 placeholder="Filter by ward (e.g. Ward 4)"
-                className={`w-full ${selectClass}`}
+                className="input"
                 aria-label="Filter by ward"
               />
             </div>
           )}
 
-          {/* Municipality Filter */}
           {onMunicipalityChange && (
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-400">
-                Municipality
-              </label>
+              <label className="label">Municipality</label>
               <input
                 type="text"
                 value={municipality}
                 onChange={(e) => onMunicipalityChange(e.target.value)}
                 placeholder="e.g. Johannesburg"
-                className={`w-full ${selectClass}`}
+                className="input"
                 aria-label="Filter by municipality"
               />
             </div>
           )}
 
-          {/* Date range filters */}
           {showDateFilter && (
             <div className="sm:col-span-2 lg:col-span-2 flex items-center gap-2">
               <div className="flex-1">
-                <label className="mb-1 block text-xs font-medium text-gray-400">
-                  From Date
-                </label>
+                <label className="label">From Date</label>
                 <input
                   type="date"
                   value={dateFrom}
                   onChange={(e) => onDateFromChange?.(e.target.value)}
-                  className={`w-full ${selectClass}`}
+                  className="input"
                   aria-label="Date from"
                 />
               </div>
               <div className="flex-1">
-                <label className="mb-1 block text-xs font-medium text-gray-400">
-                  To Date
-                </label>
+                <label className="label">To Date</label>
                 <input
                   type="date"
                   value={dateTo}
                   onChange={(e) => onDateToChange?.(e.target.value)}
-                  className={`w-full ${selectClass}`}
+                  className="input"
                   aria-label="Date to"
                 />
               </div>
