@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { doc, updateDoc } from "firebase/firestore";
 import { db } from "@/src/lib/firebase";
@@ -13,18 +13,13 @@ export default function ProfilePage() {
   const router = useRouter();
   const { user, profile, refreshProfile } = useAuth();
 
-  const [name, setName] = useState("");
-  const [phone, setPhone] = useState("");
+  const [name, setName] = useState(() => profile?.name || "");
+  const [phone, setPhone] = useState(() => profile?.phone || "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
-  useEffect(() => {
-    if (profile) {
-      setName(profile.name || "");
-      setPhone(profile.phone || "");
-    }
-  }, [profile]);
+  const profileKey = `${profile?.name || ""}-${profile?.phone || ""}`;
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
@@ -103,7 +98,7 @@ export default function ProfilePage() {
           <h3 className="text-xl font-bold">Personal Information</h3>
           <p className="mt-1 text-sm text-gray-400">Update your display name and contact details.</p>
 
-          <form onSubmit={handleSave} className="mt-5 space-y-4">
+          <form key={profileKey} onSubmit={handleSave} className="mt-5 space-y-4">
             <div>
               <label htmlFor="name" className="mb-2 block text-sm font-semibold">
                 Display Name

@@ -315,11 +315,11 @@ export default function ReportDetailsPage() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
-  const loadReport = useCallback(async () => {
-    if (!reportId) return;
+  const loadReport = useCallback(async (id: string) => {
+    await Promise.resolve();
     try {
       setLoading(true);
-      const reportRef = doc(db, "reports", reportId);
+      const reportRef = doc(db, "reports", id);
       const snapshot = await getDoc(reportRef);
 
       if (!snapshot.exists()) {
@@ -339,14 +339,14 @@ export default function ReportDetailsPage() {
     } finally {
       setLoading(false);
     }
-  }, [reportId]);
+  }, []);
 
-  const loadCaseNotes = useCallback(async () => {
-    if (!reportId) return;
+  const loadCaseNotes = useCallback(async (id: string) => {
+    await Promise.resolve();
     try {
       setNotesLoading(true);
       const notesQuery = query(
-        collection(db, "reports", reportId, "caseNotes"),
+        collection(db, "reports", id, "caseNotes"),
         orderBy("createdAt", "desc")
       );
       const snapshot = await getDocs(notesQuery);
@@ -361,14 +361,14 @@ export default function ReportDetailsPage() {
     } finally {
       setNotesLoading(false);
     }
-  }, [reportId]);
+  }, []);
 
-  const loadPublicComments = useCallback(async () => {
-    if (!reportId) return;
+  const loadPublicComments = useCallback(async (id: string) => {
+    await Promise.resolve();
     try {
       setCommentsLoading(true);
       const commentsQuery = query(
-        collection(db, "reports", reportId, "comments"),
+        collection(db, "reports", id, "comments"),
         orderBy("createdAt", "asc")
       );
       const snapshot = await getDocs(commentsQuery);
@@ -383,13 +383,15 @@ export default function ReportDetailsPage() {
     } finally {
       setCommentsLoading(false);
     }
-  }, [reportId]);
+  }, []);
 
   useEffect(() => {
-    if (reportId) {
-      loadReport();
-      loadPublicComments();
-    }
+    if (!reportId) return;
+
+    queueMicrotask(() => {
+      void loadReport(reportId);
+      void loadPublicComments(reportId);
+    });
   }, [reportId, loadReport, loadPublicComments]);
 
   // Roles and Permissions
@@ -449,12 +451,16 @@ export default function ReportDetailsPage() {
   }, [isAdmin, report?.organizationId]);
 
   useEffect(() => {
-    if (canManageCase) {
-      loadCaseNotes();
-    } else {
-      setCaseNotes([]);
-    }
-  }, [canManageCase, loadCaseNotes]);
+    if (!reportId) return;
+
+    queueMicrotask(() => {
+      if (canManageCase) {
+        void loadCaseNotes(reportId);
+      } else {
+        setCaseNotes([]);
+      }
+    });
+  }, [canManageCase, reportId, loadCaseNotes]);
 
   // Citizen confirmation
   async function handleConfirm() {
@@ -497,7 +503,7 @@ export default function ReportDetailsPage() {
       }
 
       setSuccess("You confirmed this issue.");
-      await loadReport();
+      await loadReport(reportId);
     } catch (err) {
       console.error("Confirm report error:", err);
       setError("Failed to confirm report.");
@@ -551,7 +557,7 @@ export default function ReportDetailsPage() {
       }
 
       setSuccess(`Report updated to ${getStatusLabel(newStatus)}.`);
-      await loadReport();
+      await loadReport(reportId);
     } catch (err) {
       console.error("Status update error:", err);
       setError("Failed to update report status.");
@@ -613,7 +619,7 @@ export default function ReportDetailsPage() {
       }
 
       setSuccess(`Report assigned to ${assigneeName}.`);
-      await loadReport();
+      await loadReport(reportId);
     } catch (err) {
       console.error("Assign report error:", err);
       setError("Failed to assign this report.");
@@ -640,7 +646,7 @@ export default function ReportDetailsPage() {
 
       setSelectedStaffId("");
       setSuccess("Report assignment removed.");
-      await loadReport();
+      await loadReport(reportId);
     } catch (err) {
       console.error("Unassign error:", err);
       setError("Failed to remove assignment.");
@@ -679,7 +685,7 @@ export default function ReportDetailsPage() {
           ? `Area set to "${chosenArea.name}".`
           : "Area assignment removed."
       );
-      await loadReport();
+      await loadReport(reportId);
     } catch (err) {
       console.error("Update area error:", err);
       setError("Failed to update report area.");
@@ -719,8 +725,8 @@ export default function ReportDetailsPage() {
       setSuccess(`Case escalated to Level ${escalationLevelInput}.`);
       setShowAdminEscalateModal(false);
       setEscalationReasonInput("");
-      await loadReport();
-      await loadCaseNotes();
+      await loadReport(reportId);
+      await loadCaseNotes(reportId);
     } catch (err: unknown) {
       console.error("Escalation error:", err);
       setError(err instanceof Error ? err.message : "Failed to escalate case.");
@@ -751,8 +757,8 @@ export default function ReportDetailsPage() {
       );
 
       setSuccess("Escalation resolved and cleared.");
-      await loadReport();
-      await loadCaseNotes();
+      await loadReport(reportId);
+      await loadCaseNotes(reportId);
     } catch (err: unknown) {
       console.error("Clear escalation error:", err);
       setError(err instanceof Error ? err.message : "Failed to clear escalation.");
@@ -790,8 +796,8 @@ export default function ReportDetailsPage() {
       setSuccess("Escalation requested. Organisation administrators have been notified.");
       setShowStaffEscalateModal(false);
       setStaffEscalationReason("");
-      await loadReport();
-      await loadCaseNotes();
+      await loadReport(reportId);
+      await loadCaseNotes(reportId);
     } catch (err: unknown) {
       console.error("Staff escalation error:", err);
       setError(err instanceof Error ? err.message : "Failed to request escalation.");
@@ -848,7 +854,7 @@ export default function ReportDetailsPage() {
       setSuccess(`Report moderated as ${moderationStatusInput}.`);
       setShowModerationModal(false);
       setModerationReasonInput("");
-      await loadReport();
+      await loadReport(reportId);
     } catch (err: unknown) {
       console.error("Moderation error:", err);
       setError(err instanceof Error ? err.message : "Failed to moderate report.");
@@ -880,7 +886,7 @@ export default function ReportDetailsPage() {
 
       setNewNote("");
       setSuccess("Internal case note added.");
-      await loadCaseNotes();
+      await loadCaseNotes(reportId);
     } catch (err) {
       console.error("Add note error:", err);
       setError("Failed to add the case note.");
@@ -926,7 +932,7 @@ export default function ReportDetailsPage() {
 
       setNewComment("");
       setSuccess("Comment posted.");
-      await loadPublicComments();
+      await loadPublicComments(reportId);
     } catch (err) {
       console.error("Add comment error:", err);
       setError("Failed to post comment.");
@@ -984,7 +990,7 @@ export default function ReportDetailsPage() {
       setSuccess("Dispute submitted. Administrators have been notified and will review your case.");
       setShowDisputeModal(false);
       setDisputeReasonInput("");
-      await loadReport();
+      await loadReport(reportId);
     } catch (err: unknown) {
       console.error("Dispute error:", err);
       setError(err instanceof Error ? err.message : "Failed to submit dispute.");

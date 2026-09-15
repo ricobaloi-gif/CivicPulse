@@ -171,6 +171,8 @@ export default function MapPage() {
     loading: authLoading,
   } = useAuth();
 
+  const hasLoadedRef = useRef(false);
+
   const mapContainerRef =
     useRef<HTMLDivElement | null>(
       null
@@ -378,6 +380,9 @@ export default function MapPage() {
 
       return;
     }
+
+    if (hasLoadedRef.current) return;
+    hasLoadedRef.current = true;
 
     loadData();
   }, [

@@ -17,31 +17,17 @@ import {
   ArrowRight,
 } from "lucide-react";
 
-export default function DashboardPage() {
+interface CardProps {
+  icon: React.ElementType;
+  title: string;
+  description: string;
+  href: string;
+  colorClass: string;
+}
+
+function ActionCard({ icon: Icon, title, description, href, colorClass }: CardProps) {
   const router = useRouter();
-  const { user, profile } = useAuth();
-
-  const role = profile?.role?.toLowerCase().trim() || "resident";
-  const isStaff = role === "staff" || role === "admin";
-  const isAdmin = role === "admin";
-  const displayName = profile?.name?.trim() || user?.email?.split("@")[0] || "Resident";
-
-  const hasOrg = !!profile?.organizationId;
-  const orgName = profile?.organizationName;
-
-  const ActionCard = ({
-    icon: Icon,
-    title,
-    description,
-    href,
-    colorClass,
-  }: {
-    icon: React.ElementType;
-    title: string;
-    description: string;
-    href: string;
-    colorClass: string;
-  }) => (
+  return (
     <button
       type="button"
       onClick={() => router.push(href)}
@@ -63,20 +49,11 @@ export default function DashboardPage() {
       </div>
     </button>
   );
+}
 
-  const ToolCard = ({
-    icon: Icon,
-    title,
-    description,
-    href,
-    colorClass,
-  }: {
-    icon: React.ElementType;
-    title: string;
-    description: string;
-    href: string;
-    colorClass: string;
-  }) => (
+function ToolCard({ icon: Icon, title, description, href, colorClass }: CardProps) {
+  const router = useRouter();
+  return (
     <button
       type="button"
       onClick={() => router.push(href)}
@@ -91,6 +68,18 @@ export default function DashboardPage() {
       </p>
     </button>
   );
+}
+
+export default function DashboardPage() {
+  const { user, profile } = useAuth();
+
+  const role = profile?.role?.toLowerCase().trim() || "resident";
+  const isStaff = role === "staff" || role === "admin";
+  const isAdmin = role === "admin";
+  const displayName = profile?.name?.trim() || user?.email?.split("@")[0] || "Resident";
+
+  const hasOrg = !!profile?.organizationId;
+  const orgName = profile?.organizationName;
 
   return (
     <Layout title="Dashboard">

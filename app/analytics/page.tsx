@@ -215,6 +215,54 @@ export default function AnalyticsPage() {
     return num.toString();
   };
 
+  const statusChartData = useMemo(() =>
+    data
+      ? Object.entries(data.statusBreakdown)
+          .filter(([, v]) => v > 0)
+          .map(([name, value]) => ({
+            name: name.charAt(0).toUpperCase() + name.slice(1).replace("-", " "),
+            value,
+            color: STATUS_COLORS[name] || "#6b7280",
+          }))
+      : []
+  , [data?.statusBreakdown]);
+
+  const severityChartData = useMemo(() =>
+    data
+      ? Object.entries(data.severityBreakdown)
+          .filter(([, v]) => v > 0)
+          .map(([name, value], index) => ({
+            name: name.charAt(0).toUpperCase() + name.slice(1),
+            value,
+            color: SEVERITY_COLORS[name] || CATEGORY_COLORS[index % CATEGORY_COLORS.length],
+          }))
+      : []
+  , [data?.severityBreakdown]);
+
+  const categoryChartData = useMemo(() =>
+    data
+      ? Object.entries(data.categoryBreakdown)
+          .filter(([, v]) => v > 0)
+          .map(([name, value], index) => ({
+            name,
+            value,
+            color: CATEGORY_COLORS[index % CATEGORY_COLORS.length],
+          }))
+      : []
+  , [data?.categoryBreakdown]);
+
+  const areaChartData = useMemo(() =>
+    data
+      ? Object.entries(data.areaBreakdown)
+          .filter(([, v]) => v > 0)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 10)
+          .map(([name, value]) => ({ name, value }))
+      : []
+  , [data?.areaBreakdown]);
+
+  const monthlyTrendData = useMemo(() => data?.monthlyTrend ?? [], [data?.monthlyTrend]);
+
   if (loading) {
     return (
       <Layout requireRole={["admin"]} title="Analytics">
@@ -232,46 +280,6 @@ export default function AnalyticsPage() {
   }
 
   if (!data) return null;
-
-  const statusChartData = useMemo(() =>
-    Object.entries(data.statusBreakdown)
-      .filter(([, v]) => v > 0)
-      .map(([name, value]) => ({
-        name: name.charAt(0).toUpperCase() + name.slice(1).replace("-", " "),
-        value,
-        color: STATUS_COLORS[name] || "#6b7280",
-      }))
-  , [data.statusBreakdown]);
-
-  const severityChartData = useMemo(() =>
-    Object.entries(data.severityBreakdown)
-      .filter(([, v]) => v > 0)
-      .map(([name, value], index) => ({
-        name: name.charAt(0).toUpperCase() + name.slice(1),
-        value,
-        color: SEVERITY_COLORS[name] || CATEGORY_COLORS[index % CATEGORY_COLORS.length],
-      }))
-  , [data.severityBreakdown]);
-
-  const categoryChartData = useMemo(() =>
-    Object.entries(data.categoryBreakdown)
-      .filter(([, v]) => v > 0)
-      .map(([name, value], index) => ({
-        name,
-        value,
-        color: CATEGORY_COLORS[index % CATEGORY_COLORS.length],
-      }))
-  , [data.categoryBreakdown]);
-
-  const areaChartData = useMemo(() =>
-    Object.entries(data.areaBreakdown)
-      .filter(([, v]) => v > 0)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 10)
-      .map(([name, value]) => ({ name, value }))
-  , [data.areaBreakdown]);
-
-  const monthlyTrendData = useMemo(() => data.monthlyTrend, [data.monthlyTrend]);
 
   return (
     <Layout requireRole={["admin"]} title="Analytics">

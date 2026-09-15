@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   collection,
   query,
@@ -40,12 +40,14 @@ const PAGE_SIZE = 20;
 
 export default function ReportsPage() {
   const { profile } = useAuth();
+  const organizationId = profile?.organizationId ?? null;
+
   const [reports, setReports] = useState<BrowseReport[]>([]);
   const [areaList, setAreaList] = useState<AreaOption[]>([]);
 
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [lastDoc, setLastDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
+  const lastDocRef = useRef<QueryDocumentSnapshot<DocumentData> | null>(null);
   const [hasMore, setHasMore] = useState(true);
   const [error, setError] = useState("");
 
@@ -60,56 +62,73 @@ export default function ReportsPage() {
   const [dateTo, setDateTo] = useState("");
 
   useEffect(() => {
-    if (!profile?.organizationId) return;
+    if (!organizationId) return;
 
     async function loadAreas() {
       try {
         const q = query(
           collection(db, "areas"),
-          where("organizationId", "==", profile!.organizationId)
+          where("organizationId", "==", organizationId)
         );
         const snap = await getDocs(q);
-        const items = snap.docs.map((d) => ({ id: d.id, ...d.data() } as AreaOption));
+        const items = snap.docs.map(
+          (d) => ({ id: d.id, ...d.data() } as AreaOption)
+        );
         items.sort((a, b) => a.name.localeCompare(b.name));
         setAreaList(items);
       } catch (err) {
         console.warn("Failed to load areas for browse:", err);
       }
     }
-    loadAreas();
-  }, [profile?.organizationId]);
+
+    void loadAreas();
+  }, [organizationId]);
 
   const loadReports = useCallback(
     async (isMore = false) => {
-      if (!profile?.organizationId) return;
+      if (!organizationId) return;
+
+      // Ensure state updates happen asynchronously when invoked from an effect.
+      await Promise.resolve();
+
       try {
-        if (isMore) setLoadingMore(true);
-        else setLoading(true);
+        if (isMore) {
+          setLoadingMore(true);
+        } else {
+          setLoading(true);
+          lastDocRef.current = null;
+        }
         setError("");
 
+        const cursor = isMore ? lastDocRef.current : null;
         const q =
-          isMore && lastDoc
+          cursor
             ? query(
                 collection(db, "reports"),
-                where("organizationId", "==", profile.organizationId),
+                where("organizationId", "==", organizationId),
                 orderBy("createdAt", "desc"),
-                startAfter(lastDoc),
+                startAfter(cursor),
                 limit(PAGE_SIZE)
               )
             : query(
                 collection(db, "reports"),
-                where("organizationId", "==", profile.organizationId),
+                where("organizationId", "==", organizationId),
                 orderBy("createdAt", "desc"),
                 limit(PAGE_SIZE)
               );
+
         const snapshot = await getDocs(q);
         const items = snapshot.docs.map(
           (d) => ({ id: d.id, ...d.data() } as BrowseReport)
         );
 
-        if (isMore) setReports((p) => [...p, ...items]);
-        else setReports(items);
-        setLastDoc(snapshot.docs[snapshot.docs.length - 1] ?? null);
+        if (isMore) {
+          setReports((previous) => [...previous, ...items]);
+        } else {
+          setReports(items);
+        }
+
+        lastDocRef.current = snapshot.docs[snapshot.docs.length - 1] ?? null;
         setHasMore(snapshot.docs.length === PAGE_SIZE);
       } catch (err) {
         console.error("Browse reports error:", err);
@@ -119,13 +138,16 @@ export default function ReportsPage() {
         setLoadingMore(false);
       }
     },
-    [profile?.organizationId, lastDoc]
+    [organizationId]
   );
 
   useEffect(() => {
-    if (profile?.organizationId) loadReports(false);
-    else setLoading(false);
-  }, [profile?.organizationId]);
+    if (!organizationId) return;
+
+    queueMicrotask(() => {
+      void loadReports(false);
+    });
+  }, [organizationId, loadReports]);
 
   const filtered = useMemo(() => {
     return reports.filter((r) => {
@@ -151,26 +173,27 @@ export default function ReportsPage() {
       }
 
       if (search.trim()) {
-        const t = search.toLowerCase().trim();
-        const idMatch = r.id.toLowerCase().includes(t);
-        const titleMatch = r.title?.toLowerCase().includes(t);
-        const descMatch = r.description?.toLowerCase().includes(t);
-        const wardMatch = r.ward?.toLowerCase().includes(t);
-        const areaMatch = r.areaName?.toLowerCase().includes(t);
+        const term = search.toLowerCase().trim();
+        const idMatch = r.id.toLowerCase().includes(term);
+        const titleMatch = r.title?.toLowerCase().includes(term);
+        const descMatch = r.description?.toLowerCase().includes(term);
+        const wardMatch = r.ward?.toLowerCase().includes(term);
+        const areaMatch = r.areaName?.toLowerCase().includes(term);
         if (!idMatch && !titleMatch && !descMatch && !wardMatch && !areaMatch) {
           return false;
         }
       }
 
       if (dateFrom && r.createdAt) {
-        const d = "toDate" in r.createdAt ? r.createdAt.toDate() : r.createdAt;
-        if (d && d < new Date(dateFrom)) return false;
+        const date = r.createdAt.toDate();
+        if (date < new Date(dateFrom)) return false;
       }
+
       if (dateTo && r.createdAt) {
-        const d = "toDate" in r.createdAt ? r.createdAt.toDate() : r.createdAt;
+        const date = r.createdAt.toDate();
         const end = new Date(dateTo);
         end.setDate(end.getDate() + 1);
-        if (d && d > end) return false;
+        if (date > end) return false;
       }
 
       return true;
@@ -188,7 +211,7 @@ export default function ReportsPage() {
     dateTo,
   ]);
 
-  if (!profile?.organizationId) {
+  if (!organizationId) {
     return (
       <Layout title="Browse Reports">
         <EmptyState
@@ -249,11 +272,13 @@ export default function ReportsPage() {
         />
       ) : (
         <div className="space-y-3">
-          <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
-            <span>Showing {filtered.length} report{filtered.length !== 1 ? "s" : ""}</span>
+          <div className="flex items-center justify-between px-1 text-xs text-muted-foreground">
+            <span>
+              Showing {filtered.length} report{filtered.length !== 1 ? "s" : ""}
+            </span>
           </div>
-          {filtered.map((r) => (
-            <ReportCard key={r.id} report={r} />
+          {filtered.map((report) => (
+            <ReportCard key={report.id} report={report} />
           ))}
         </div>
       )}
@@ -262,7 +287,7 @@ export default function ReportsPage() {
         <div className="mt-6 text-center">
           <button
             type="button"
-            onClick={() => loadReports(true)}
+            onClick={() => void loadReports(true)}
             disabled={loadingMore}
             className="btn-secondary"
           >

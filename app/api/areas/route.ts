@@ -1,11 +1,30 @@
 import { NextRequest } from "next/server";
-import { Query, DocumentSnapshot } from "firebase-admin/firestore";
+import { Query, DocumentSnapshot, Timestamp } from "firebase-admin/firestore";
 import { validateApiKey } from "@/src/lib/apiAuth";
 import { checkRateLimit, addRateLimitHeaders, createRateLimitedResponse } from "@/src/lib/rateLimit";
 import { success, error, validationError, unauthorized, internalError } from "@/src/lib/apiResponse";
 import { adminDb } from "@/src/lib/apiAuth";
 
 export const dynamic = "force-dynamic";
+
+function toISOString(value: unknown): string | undefined {
+  if (!value) return undefined;
+  if (value instanceof Date) return value.toISOString();
+  if (value instanceof Timestamp) return value.toDate().toISOString();
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "toDate" in value &&
+    typeof (value as Record<string, unknown>).toDate === "function"
+  ) {
+    return (value as { toDate: () => Date }).toDate().toISOString();
+  }
+  if (typeof value === "string" || typeof value === "number") {
+    const date = new Date(value as string | number);
+    return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+  }
+  return undefined;
+}
 
 export async function GET(request: NextRequest) {
   const authResult = await validateApiKey(request.headers.get("Authorization"));
@@ -49,8 +68,8 @@ export async function GET(request: NextRequest) {
         country: data.country as string | undefined,
         active: data.active as boolean,
         assignedStaff: (data.assignedStaff as string[]) || [],
-        createdAt: (data.createdAt as any)?.toDate?.()?.toISOString() || data.createdAt,
-        updatedAt: (data.updatedAt as any)?.toDate?.()?.toISOString() || data.updatedAt,
+        createdAt: toISOString(data.createdAt) ?? data.createdAt,
+        updatedAt: toISOString(data.updatedAt) ?? data.updatedAt,
       };
     });
 

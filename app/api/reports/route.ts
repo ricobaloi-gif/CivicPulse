@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { FieldValue, Query, DocumentSnapshot } from "firebase-admin/firestore";
+import { FieldValue, Query, DocumentSnapshot, QueryDocumentSnapshot, Timestamp } from "firebase-admin/firestore";
 import { validateApiKey } from "@/src/lib/apiAuth";
 import { checkRateLimit, addRateLimitHeaders, createRateLimitedResponse } from "@/src/lib/rateLimit";
 import { success, error, validationError, unauthorized, notFound, internalError } from "@/src/lib/apiResponse";
@@ -8,6 +8,25 @@ import { adminDb } from "@/src/lib/apiAuth";
 import type { ReportCategory, ReportSeverity, ReportStatus } from "@/src/lib/types";
 
 export const dynamic = "force-dynamic";
+
+function toISOString(value: unknown): string | undefined {
+  if (!value) return undefined;
+  if (value instanceof Date) return value.toISOString();
+  if (value instanceof Timestamp) return value.toDate().toISOString();
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "toDate" in value &&
+    typeof (value as Record<string, unknown>).toDate === "function"
+  ) {
+    return (value as { toDate: () => Date }).toDate().toISOString();
+  }
+  if (typeof value === "string" || typeof value === "number") {
+    const date = new Date(value as string | number);
+    return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+  }
+  return undefined;
+}
 
 const MAX_LIMIT = 100;
 const DEFAULT_LIMIT = 20;
@@ -120,10 +139,10 @@ function sanitizeReport(doc: DocumentSnapshot, includePrivate = false): Record<s
     assignedTo: data.assignedTo,
     assignedToName: data.assignedToName,
     escalationLevel: data.escalationLevel || 0,
-    createdAt: (data.createdAt as any)?.toDate?.()?.toISOString() || data.createdAt,
-    updatedAt: (data.updatedAt as any)?.toDate?.()?.toISOString() || data.updatedAt,
-    submittedAt: (data.submittedAt as any)?.toDate?.()?.toISOString() || data.submittedAt,
-    acknowledgedAt: (data.acknowledgedAt as any)?.toDate?.()?.toISOString() || data.acknowledgedAt,
+    createdAt: toISOString(data.createdAt) ?? data.createdAt,
+    updatedAt: toISOString(data.updatedAt) ?? data.updatedAt,
+    submittedAt: toISOString(data.submittedAt) ?? data.submittedAt,
+    acknowledgedAt: toISOString(data.acknowledgedAt) ?? data.acknowledgedAt,
   };
 
   if (includePrivate) {
@@ -132,14 +151,14 @@ function sanitizeReport(doc: DocumentSnapshot, includePrivate = false): Record<s
     report.organizationId = data.organizationId;
     report.organizationName = data.organizationName;
     report.confirmedBy = data.confirmedBy;
-    report.assignedAt = (data.assignedAt as any)?.toDate?.()?.toISOString() || data.assignedAt;
+    report.assignedAt = toISOString(data.assignedAt) ?? data.assignedAt;
     report.priority = data.priority;
     report.escalated = data.escalated;
-    report.escalatedAt = (data.escalatedAt as any)?.toDate?.()?.toISOString() || data.escalatedAt;
+    report.escalatedAt = toISOString(data.escalatedAt) ?? data.escalatedAt;
     report.escalatedBy = data.escalatedBy;
     report.escalationReason = data.escalationReason;
     report.resolutionNote = data.resolutionNote;
-    report.resolvedAt = (data.resolvedAt as any)?.toDate?.()?.toISOString() || data.resolvedAt;
+    report.resolvedAt = toISOString(data.resolvedAt) ?? data.resolvedAt;
     report.resolvedBy = data.resolvedBy;
     report.resolutionImageUrls = data.resolutionImageUrls;
     report.moderationStatus = data.moderationStatus;
@@ -201,7 +220,7 @@ export async function GET(request: NextRequest) {
     }
 
     const snapshot = await q.get();
-    const reports = snapshot.docs.map((doc) => sanitizeReport(doc, false));
+    const reports = snapshot.docs.map((doc: QueryDocumentSnapshot) => sanitizeReport(doc, false));
 
     const response = success({
       reports,

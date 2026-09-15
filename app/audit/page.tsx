@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import {
   collection,
   getDocs,
@@ -47,7 +47,7 @@ interface AuditLogEntry {
 export default function AuditPage() {
   const { profile } = useAuth();
   const [logs, setLogs] = useState<AuditLogEntry[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [lastDoc, setLastDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
   const [hasMore, setHasMore] = useState(true);
@@ -59,26 +59,32 @@ export default function AuditPage() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
 
+  const profileRef = useRef(profile);
+  const lastDocRef = useRef(lastDoc);
+  useEffect(() => { profileRef.current = profile; }, [profile]);
+  useEffect(() => { lastDocRef.current = lastDoc; }, [lastDoc]);
+
   const loadLogs = useCallback(
     async (isMore = false) => {
-      if (!profile?.organizationId) return;
+      const orgId = profileRef.current?.organizationId;
+      if (!orgId) return;
       try {
         if (isMore) setLoadingMore(true);
         else setLoading(true);
 
         let q = query(
           collection(db, "auditLogs"),
-          where("organizationId", "==", profile.organizationId),
+          where("organizationId", "==", orgId),
           orderBy("timestamp", "desc"),
           limit(PAGE_SIZE)
         );
 
-        if (isMore && lastDoc) {
+        if (isMore && lastDocRef.current) {
           q = query(
             collection(db, "auditLogs"),
-            where("organizationId", "==", profile.organizationId),
+            where("organizationId", "==", orgId),
             orderBy("timestamp", "desc"),
-            startAfter(lastDoc),
+            startAfter(lastDocRef.current),
             limit(PAGE_SIZE)
           );
         }
@@ -101,13 +107,16 @@ export default function AuditPage() {
         setLoadingMore(false);
       }
     },
-    [profile?.organizationId, lastDoc]
+    []
   );
 
+  const hasLoadedRef = useRef(false);
   useEffect(() => {
-    if (profile?.organizationId) loadLogs(false);
-    else setLoading(false);
-  }, [profile?.organizationId]);
+    if (!profile?.organizationId) return;
+    if (hasLoadedRef.current) return;
+    hasLoadedRef.current = true;
+    loadLogs(false);
+  }, [profile?.organizationId, loadLogs]);
 
   const filtered = useMemo(() => {
     return logs.filter((log) => {

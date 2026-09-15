@@ -31,12 +31,14 @@ interface StaffReport {
 
 export default function StaffPage() {
   const { user, profile } = useAuth();
+  const userId = user?.uid ?? null;
+  const organizationId = profile?.organizationId ?? null;
+
   const [reports, setReports] = useState<StaffReport[]>([]);
   const [areaList, setAreaList] = useState<AreaOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  // Search and filters
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("");
   const [severity, setSeverity] = useState("");
@@ -48,42 +50,40 @@ export default function StaffPage() {
   const [dateTo, setDateTo] = useState("");
 
   useEffect(() => {
-    if (!user || !profile?.organizationId) {
-      setLoading(false);
-      return;
-    }
+    if (!userId || !organizationId) return;
 
     async function fetchCases() {
+      await Promise.resolve();
+
       try {
         setLoading(true);
-        const orgId = profile!.organizationId!;
+        setError("");
 
-        // 1. Fetch assigned reports (strictly scoped to assigned staff member and organisation)
-        const q = query(
+        const reportsQuery = query(
           collection(db, "reports"),
-          where("organizationId", "==", orgId)
+          where("organizationId", "==", organizationId)
         );
-        const snapshot = await getDocs(q);
+        const snapshot = await getDocs(reportsQuery);
         const all = snapshot.docs
           .map((d) => ({ id: d.id, ...d.data() } as StaffReport))
-          .filter((r) => r.assignedTo === user!.uid)
+          .filter((report) => report.assignedTo === userId)
           .sort((a, b) => {
-            const da =
+            const first =
               a.createdAt && "toDate" in a.createdAt
                 ? a.createdAt.toDate().getTime()
                 : 0;
-            const db2 =
+            const second =
               b.createdAt && "toDate" in b.createdAt
                 ? b.createdAt.toDate().getTime()
                 : 0;
-            return db2 - da;
+            return second - first;
           });
+
         setReports(all);
 
-        // 2. Fetch areas
         const areasQuery = query(
           collection(db, "areas"),
-          where("organizationId", "==", orgId)
+          where("organizationId", "==", organizationId)
         );
         const areasSnap = await getDocs(areasQuery);
         const areas = areasSnap.docs.map(
@@ -98,58 +98,61 @@ export default function StaffPage() {
         setLoading(false);
       }
     }
-    fetchCases();
-  }, [user, profile]);
+
+    void fetchCases();
+  }, [userId, organizationId]);
 
   const filtered = useMemo(() => {
-    return reports.filter((r) => {
-      if (category && r.category !== category) return false;
-      if (severity && r.severity !== severity) return false;
-      if (status && r.status !== status) return false;
+    return reports.filter((report) => {
+      if (category && report.category !== category) return false;
+      if (severity && report.severity !== severity) return false;
+      if (status && report.status !== status) return false;
 
-      // Area filter
       if (areaId) {
-        const matchesId = r.areaId === areaId;
-        const matchesName = r.areaName?.toLowerCase() === areaId.toLowerCase();
+        const matchesId = report.areaId === areaId;
+        const matchesName =
+          report.areaName?.toLowerCase() === areaId.toLowerCase();
         if (!matchesId && !matchesName) return false;
       }
 
-      // Ward filter
-      if (ward && !r.ward?.toLowerCase().includes(ward.toLowerCase().trim())) {
-        return false;
-      }
-
-      // Municipality filter
       if (
-        municipality &&
-        !r.municipality?.toLowerCase().includes(municipality.toLowerCase().trim())
+        ward &&
+        !report.ward?.toLowerCase().includes(ward.toLowerCase().trim())
       ) {
         return false;
       }
 
-      // Search by ID, title, description, ward
+      if (
+        municipality &&
+        !report.municipality
+          ?.toLowerCase()
+          .includes(municipality.toLowerCase().trim())
+      ) {
+        return false;
+      }
+
       if (search) {
         const term = search.toLowerCase().trim();
-        const idMatch = r.id.toLowerCase().includes(term);
-        const titleMatch = r.title?.toLowerCase().includes(term);
-        const descMatch = r.description?.toLowerCase().includes(term);
-        const wardMatch = r.ward?.toLowerCase().includes(term);
-        const areaMatch = r.areaName?.toLowerCase().includes(term);
+        const idMatch = report.id.toLowerCase().includes(term);
+        const titleMatch = report.title?.toLowerCase().includes(term);
+        const descMatch = report.description?.toLowerCase().includes(term);
+        const wardMatch = report.ward?.toLowerCase().includes(term);
+        const areaMatch = report.areaName?.toLowerCase().includes(term);
         if (!idMatch && !titleMatch && !descMatch && !wardMatch && !areaMatch) {
           return false;
         }
       }
 
-      // Date filtering
-      if (dateFrom && r.createdAt) {
-        const d = "toDate" in r.createdAt ? r.createdAt.toDate() : r.createdAt;
-        if (d && d < new Date(dateFrom)) return false;
+      if (dateFrom && report.createdAt) {
+        const date = report.createdAt.toDate();
+        if (date < new Date(dateFrom)) return false;
       }
-      if (dateTo && r.createdAt) {
-        const d = "toDate" in r.createdAt ? r.createdAt.toDate() : r.createdAt;
+
+      if (dateTo && report.createdAt) {
+        const date = report.createdAt.toDate();
         const end = new Date(dateTo);
         end.setDate(end.getDate() + 1);
-        if (d && d > end) return false;
+        if (date > end) return false;
       }
 
       return true;
@@ -168,20 +171,27 @@ export default function StaffPage() {
   ]);
 
   const active = reports.filter(
-    (r) => r.status !== "resolved" && r.status !== "rejected"
+    (report) => report.status !== "resolved" && report.status !== "rejected"
   ).length;
-  const inProgress = reports.filter((r) => r.status === "in-progress").length;
-  const resolved = reports.filter((r) => r.status === "resolved").length;
+  const inProgress = reports.filter(
+    (report) => report.status === "in-progress"
+  ).length;
+  const resolved = reports.filter(
+    (report) => report.status === "resolved"
+  ).length;
   const critical = reports.filter(
-    (r) => r.severity === "critical" && r.status !== "resolved"
+    (report) =>
+      report.severity === "critical" && report.status !== "resolved"
   ).length;
-  const escalated = reports.filter((r) => (r.escalationLevel ?? 0) > 0).length;
+  const escalated = reports.filter(
+    (report) => (report.escalationLevel ?? 0) > 0
+  ).length;
 
   return (
     <Layout requireRole={["staff", "admin"]} title="My Cases">
-      {!profile?.organizationId ? (
+      {!organizationId ? (
         <EmptyState
-          icon="🏢"
+          icon="org"
           title="No Organisation"
           message="You need to belong to an organisation before cases can be assigned."
         />
@@ -247,8 +257,12 @@ export default function StaffPage() {
             </div>
           ) : filtered.length === 0 ? (
             <EmptyState
-              icon="🗂️"
-              title={reports.length === 0 ? "No cases assigned" : "No matching cases"}
+              icon="cases"
+              title={
+                reports.length === 0
+                  ? "No cases assigned"
+                  : "No matching cases"
+              }
               message={
                 reports.length === 0
                   ? "Cases assigned to you will appear here."
@@ -257,11 +271,14 @@ export default function StaffPage() {
             />
           ) : (
             <div className="space-y-3">
-              <div className="flex items-center justify-between text-xs text-gray-500 px-1">
-                <span>Showing {filtered.length} assigned case{filtered.length !== 1 ? "s" : ""}</span>
+              <div className="flex items-center justify-between px-1 text-xs text-gray-500">
+                <span>
+                  Showing {filtered.length} assigned case
+                  {filtered.length !== 1 ? "s" : ""}
+                </span>
               </div>
-              {filtered.map((r) => (
-                <ReportCard key={r.id} report={r} />
+              {filtered.map((report) => (
+                <ReportCard key={report.id} report={report} />
               ))}
             </div>
           )}

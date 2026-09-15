@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
   collection,
@@ -50,7 +50,7 @@ export default function AdminPage() {
   const [staffList, setStaffList] = useState<StaffOption[]>([]);
   const [areaList, setAreaList] = useState<AreaOption[]>([]);
 
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [lastDoc, setLastDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
   const [hasMore, setHasMore] = useState(true);
@@ -67,6 +67,11 @@ export default function AdminPage() {
   const [municipality, setMunicipality] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+
+  const profileRef = useRef(profile);
+  const lastDocRef = useRef(lastDoc);
+  useEffect(() => { profileRef.current = profile; }, [profile]);
+  useEffect(() => { lastDocRef.current = lastDoc; }, [lastDoc]);
 
   // Load staff and areas for the organisation
   useEffect(() => {
@@ -106,54 +111,55 @@ export default function AdminPage() {
     loadMetadata();
   }, [profile?.organizationId]);
 
-  const loadReports = useCallback(
-    async (isMore = false) => {
-      if (!profile?.organizationId) return;
-      try {
-        if (isMore) setLoadingMore(true);
-        else setLoading(true);
+  const loadReports = useCallback(async (isMore = false) => {
+    const orgId = profileRef.current?.organizationId;
+    if (!orgId) return;
+    try {
+      if (isMore) setLoadingMore(true);
+      else setLoading(true);
 
-        const q =
-          isMore && lastDoc
-            ? query(
-                collection(db, "reports"),
-                where("organizationId", "==", profile.organizationId),
-                orderBy("createdAt", "desc"),
-                startAfter(lastDoc),
-                limit(PAGE_SIZE)
-              )
-            : query(
-                collection(db, "reports"),
-                where("organizationId", "==", profile.organizationId),
-                orderBy("createdAt", "desc"),
-                limit(PAGE_SIZE)
-              );
+      const q =
+        isMore && lastDocRef.current
+          ? query(
+              collection(db, "reports"),
+              where("organizationId", "==", orgId),
+              orderBy("createdAt", "desc"),
+              startAfter(lastDocRef.current),
+              limit(PAGE_SIZE)
+            )
+          : query(
+              collection(db, "reports"),
+              where("organizationId", "==", orgId),
+              orderBy("createdAt", "desc"),
+              limit(PAGE_SIZE)
+            );
 
-        const snapshot = await getDocs(q);
-        const items = snapshot.docs.map(
-          (d) => ({ id: d.id, ...d.data() } as AdminReport)
-        );
+      const snapshot = await getDocs(q);
+      const items = snapshot.docs.map(
+        (d) => ({ id: d.id, ...d.data() } as AdminReport)
+      );
 
-        if (isMore) setReports((p) => [...p, ...items]);
-        else setReports(items);
+      if (isMore) setReports((p) => [...p, ...items]);
+      else setReports(items);
 
-        setLastDoc(snapshot.docs[snapshot.docs.length - 1] ?? null);
-        setHasMore(snapshot.docs.length === PAGE_SIZE);
-      } catch (err) {
-        console.error("Admin load error:", err);
-        setError("Failed to load reports.");
-      } finally {
-        setLoading(false);
-        setLoadingMore(false);
-      }
-    },
-    [profile?.organizationId, lastDoc]
-  );
+      setLastDoc(snapshot.docs[snapshot.docs.length - 1] ?? null);
+      setHasMore(snapshot.docs.length === PAGE_SIZE);
+    } catch (err) {
+      console.error("Admin load error:", err);
+      setError("Failed to load reports.");
+    } finally {
+      setLoading(false);
+      setLoadingMore(false);
+    }
+  }, []);
 
+  const hasLoadedRef = useRef(false);
   useEffect(() => {
-    if (profile?.organizationId) loadReports(false);
-    else setLoading(false);
-  }, [profile?.organizationId]);
+    if (!profile?.organizationId) return;
+    if (hasLoadedRef.current) return;
+    hasLoadedRef.current = true;
+    loadReports(false);
+  }, [profile?.organizationId, loadReports]);
 
   // Comprehensive client-side multi-field filtering
   const filtered = useMemo(() => {

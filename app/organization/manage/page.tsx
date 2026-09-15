@@ -50,17 +50,10 @@ export default function OrganizationManagePage() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
-  const loadOrgData = useCallback(async () => {
-    if (!profile?.organizationId) {
-      setLoading(false);
-      return;
-    }
-
+  const loadOrgData = useCallback(async (orgId: string) => {
     try {
       setLoading(true);
       setError("");
-
-      const orgId = profile.organizationId;
 
       // 1. Fetch organization details
       const orgRef = doc(db, "organizations", orgId);
@@ -106,14 +99,19 @@ export default function OrganizationManagePage() {
     } finally {
       setLoading(false);
     }
-  }, [profile?.organizationId]);
+  }, []);
 
   useEffect(() => {
-    if (profile?.organizationId) {
-      loadOrgData();
-    } else {
-      setLoading(false);
-    }
+    const organizationId = profile?.organizationId;
+
+    queueMicrotask(() => {
+      if (!organizationId) {
+        setLoading(false);
+        return;
+      }
+
+      void loadOrgData(organizationId);
+    });
   }, [profile?.organizationId, loadOrgData]);
 
   // Send invitation
@@ -146,7 +144,7 @@ export default function OrganizationManagePage() {
 
       setSuccess(`Invitation successfully sent to ${trimmedEmail}.`);
       setInviteEmail("");
-      await loadOrgData();
+      if (profile?.organizationId) await loadOrgData(profile.organizationId);
     } catch (err: unknown) {
       console.error("Invite error:", err);
       setError(err instanceof Error ? err.message : "Failed to send invitation.");
@@ -173,7 +171,7 @@ export default function OrganizationManagePage() {
       );
 
       setSuccess(`Invitation for ${invite.email} was cancelled.`);
-      await loadOrgData();
+      if (profile?.organizationId) await loadOrgData(profile.organizationId);
     } catch (err: unknown) {
       console.error("Cancel invite error:", err);
       setError(err instanceof Error ? err.message : "Failed to cancel invitation.");
@@ -229,7 +227,7 @@ export default function OrganizationManagePage() {
       });
 
       setSuccess(`${member.name || member.email} was removed from ${organization.name}.`);
-      await loadOrgData();
+      if (profile?.organizationId) await loadOrgData(profile.organizationId);
     } catch (err) {
       console.error("Remove member error:", err);
       setError("Failed to remove this member.");
@@ -282,7 +280,7 @@ export default function OrganizationManagePage() {
       });
 
       setSuccess(`Role updated to ${newRole} for ${member.name || member.email}.`);
-      await loadOrgData();
+      if (profile?.organizationId) await loadOrgData(profile.organizationId);
     } catch (err) {
       console.error("Update role error:", err);
       setError("Failed to update member role.");

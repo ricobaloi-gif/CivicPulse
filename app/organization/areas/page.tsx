@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { collection, query, where, getDocs } from "firebase/firestore";
 import { db } from "@/src/lib/firebase";
@@ -21,7 +21,7 @@ export default function OrganizationAreasPage() {
 
   const [areas, setAreas] = useState<Area[]>([]);
   const [staffList, setStaffList] = useState<UserProfile[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
@@ -45,8 +45,12 @@ export default function OrganizationAreasPage() {
   const [formProvince, setFormProvince] = useState("");
   const [formStaff, setFormStaff] = useState<string[]>([]);
 
+  const profileRef = useRef(profile);
+  useEffect(() => { profileRef.current = profile; }, [profile]);
+
   const loadData = useCallback(async () => {
-    if (!profile?.organizationId) {
+    const currentProfile = profileRef.current;
+    if (!currentProfile?.organizationId) {
       setLoading(false);
       return;
     }
@@ -55,7 +59,7 @@ export default function OrganizationAreasPage() {
       setLoading(true);
       setError("");
 
-      const orgId = profile.organizationId;
+      const orgId = currentProfile.organizationId;
 
       // 1. Fetch areas scoped to organization
       const areasQuery = query(
@@ -88,14 +92,18 @@ export default function OrganizationAreasPage() {
     } finally {
       setLoading(false);
     }
-  }, [profile?.organizationId]);
+  }, []);
 
+  const hasLoadedRef = useRef(false);
   useEffect(() => {
-    if (profile?.organizationId) {
-      loadData();
-    } else {
+    const currentProfile = profileRef.current;
+    if (!currentProfile?.organizationId) {
       setLoading(false);
+      return;
     }
+    if (hasLoadedRef.current) return;
+    hasLoadedRef.current = true;
+    loadData();
   }, [profile?.organizationId, loadData]);
 
   function openCreateModal() {

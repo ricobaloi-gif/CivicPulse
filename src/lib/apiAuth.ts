@@ -1,5 +1,5 @@
 import { initializeApp, getApps, cert, App } from "firebase-admin/app";
-import { getFirestore, Firestore, Timestamp } from "firebase-admin/firestore";
+import { getFirestore, Firestore, Timestamp, DocumentData, QueryDocumentSnapshot } from "firebase-admin/firestore";
 import { getAuth } from "firebase-admin/auth";
 import { createHash, randomBytes } from "crypto";
 import type { NextRequest } from "next/server";
@@ -140,7 +140,7 @@ function toDate(value: unknown): Date | undefined {
     typeof value === "object" &&
     value !== null &&
     "toDate" in value &&
-    typeof (value as { toDate?: unknown }).toDate === "function"
+    typeof (value as Record<string, unknown>).toDate === "function"
   ) {
     return (value as { toDate: () => Date }).toDate();
   }
@@ -149,7 +149,7 @@ function toDate(value: unknown): Date | undefined {
   return Number.isNaN(date.getTime()) ? undefined : date;
 }
 
-function mapApiKey(id: string, data: FirebaseFirestore.DocumentData): ApiKeyData {
+function mapApiKey(id: string, data: DocumentData): ApiKeyData {
   return {
     id,
     organizationId: String(data.organizationId ?? ""),
@@ -271,7 +271,7 @@ export async function listApiKeys(
     .orderBy("createdAt", "desc")
     .get();
 
-  return snapshot.docs.map((doc) => mapApiKey(doc.id, doc.data()));
+  return snapshot.docs.map((doc: QueryDocumentSnapshot<DocumentData>) => mapApiKey(doc.id, doc.data()));
 }
 
 export async function revokeApiKey(

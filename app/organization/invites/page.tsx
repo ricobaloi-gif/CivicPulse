@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { collection, query, where, getDocs } from "firebase/firestore";
 import { db } from "@/src/lib/firebase";
@@ -19,13 +19,17 @@ export default function OrganizationInvitesPage() {
   const { user, profile, refreshProfile } = useAuth();
 
   const [invites, setInvites] = useState<OrganizationInvite[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [actingInviteId, setActingInviteId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
+  const userRef = useRef(user);
+  useEffect(() => { userRef.current = user; }, [user]);
+
   const loadPendingInvites = useCallback(async () => {
-    if (!user?.email) {
+    const currentUser = userRef.current;
+    if (!currentUser?.email) {
       setLoading(false);
       return;
     }
@@ -34,7 +38,7 @@ export default function OrganizationInvitesPage() {
       setLoading(true);
       setError("");
 
-      const normalizedEmail = user.email.trim().toLowerCase();
+      const normalizedEmail = currentUser.email.trim().toLowerCase();
       const q = query(
         collection(db, "organizationInvites"),
         where("email", "==", normalizedEmail),
@@ -54,14 +58,18 @@ export default function OrganizationInvitesPage() {
     } finally {
       setLoading(false);
     }
-  }, [user?.email]);
+  }, []);
 
+  const hasLoadedRef = useRef(false);
   useEffect(() => {
-    if (user?.email) {
-      loadPendingInvites();
-    } else {
+    const currentUser = userRef.current;
+    if (!currentUser?.email) {
       setLoading(false);
+      return;
     }
+    if (hasLoadedRef.current) return;
+    hasLoadedRef.current = true;
+    loadPendingInvites();
   }, [user?.email, loadPendingInvites]);
 
   async function handleAccept(invite: OrganizationInvite) {

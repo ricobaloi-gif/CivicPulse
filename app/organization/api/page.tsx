@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/src/lib/AuthContext";
 import { Layout } from "@/src/components/Layout";
@@ -21,6 +21,18 @@ interface ApiKeyDisplay {
   rawKey?: string;
 }
 
+interface ApiKeyRaw {
+  id: string;
+  name: string;
+  prefix: string;
+  active: boolean;
+  permissions: string[];
+  createdAt: { toDate?: () => Date } | string | number | Date;
+  createdBy: string;
+  lastUsedAt?: { toDate?: () => Date } | string | number | Date;
+  revokedAt?: { toDate?: () => Date } | string | number | Date;
+}
+
 export default function OrganizationApiPage() {
   const router = useRouter();
   const { user, profile } = useAuth();
@@ -38,13 +50,19 @@ export default function OrganizationApiPage() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
+  const userRef = useRef(user);
+  const profileRef = useRef(profile);
+  useEffect(() => { userRef.current = user; }, [user]);
+  useEffect(() => { profileRef.current = profile; }, [profile]);
+
   const authenticatedFetch = useCallback(
     async (input: RequestInfo | URL, init: RequestInit = {}) => {
-      if (!user) {
+      const currentUser = userRef.current;
+      if (!currentUser) {
         throw new Error("You must be signed in to manage API keys.");
       }
 
-      const idToken = await user.getIdToken();
+      const idToken = await currentUser.getIdToken();
 
       const headers = new Headers(init.headers);
       headers.set("Authorization", `Bearer ${idToken}`);
@@ -58,11 +76,23 @@ export default function OrganizationApiPage() {
         headers,
       });
     },
-    [user]
+    []
   );
 
+  function toDate(value: { toDate?: () => Date } | string | number | Date | undefined): Date | undefined {
+    if (!value) return undefined;
+    if (value instanceof Date) return value;
+    if (typeof value === "object" && "toDate" in value && typeof value.toDate === "function") {
+      return value.toDate();
+    }
+    const date = new Date(value as string | number);
+    return Number.isNaN(date.getTime()) ? undefined : date;
+  }
+
   const loadApiKeys = useCallback(async () => {
-    if (!user || !profile?.organizationId) return;
+    const currentUser = userRef.current;
+    const currentProfile = profileRef.current;
+    if (!currentUser || !currentProfile?.organizationId) return;
 
     try {
       setLoading(true);
@@ -78,11 +108,11 @@ export default function OrganizationApiPage() {
       const payload = await response.json();
       const data = payload.data ?? payload;
       setApiKeys(
-        (data.apiKeys ?? []).map((k: any) => ({
+        (data.apiKeys ?? []).map((k: ApiKeyRaw) => ({
           ...k,
-          createdAt: k.createdAt?.toDate ? k.createdAt.toDate() : new Date(k.createdAt),
-          lastUsedAt: k.lastUsedAt?.toDate ? k.lastUsedAt.toDate() : k.lastUsedAt ? new Date(k.lastUsedAt) : undefined,
-          revokedAt: k.revokedAt?.toDate ? k.revokedAt.toDate() : k.revokedAt ? new Date(k.revokedAt) : undefined,
+          createdAt: toDate(k.createdAt) ?? new Date(0),
+          lastUsedAt: toDate(k.lastUsedAt),
+          revokedAt: toDate(k.revokedAt),
         }))
       );
     } catch (err) {
@@ -91,14 +121,19 @@ export default function OrganizationApiPage() {
     } finally {
       setLoading(false);
     }
-  }, [user, profile?.organizationId, authenticatedFetch]);
+  }, [authenticatedFetch]);
 
+  const hasLoadedRef = useRef(false);
   useEffect(() => {
-    if (user && profile?.organizationId) {
-      loadApiKeys();
-    } else {
+    const currentUser = userRef.current;
+    const currentProfile = profileRef.current;
+    if (!currentUser || !currentProfile?.organizationId) {
       setLoading(false);
+      return;
     }
+    if (hasLoadedRef.current) return;
+    hasLoadedRef.current = true;
+    loadApiKeys();
   }, [user, profile?.organizationId, loadApiKeys]);
 
   async function handleCreateKey(e: React.FormEvent) {
@@ -269,7 +304,7 @@ export default function OrganizationApiPage() {
         <section className="mb-10 rounded-2xl border border-gray-800 bg-gray-900 p-6">
           <h2 className="text-xl font-bold">Create New API Key</h2>
           <p className="mt-1 text-sm text-gray-400">
-            Give your key a descriptive name to identify its purpose (e.g., "Mobile App", "CI/CD Pipeline", "Partner Integration").
+            Give your key a descriptive name to identify its purpose (e.g., &ldquo;Mobile App&rdquo;, &ldquo;CI/CD Pipeline&rdquo;, &ldquo;Partner Integration&rdquo;).
           </p>
 
           <form onSubmit={handleCreateKey} className="mt-5 flex flex-col gap-3 sm:flex-row">
@@ -481,7 +516,7 @@ export default function OrganizationApiPage() {
               }}
               className="w-full rounded-lg bg-blue-600 py-3 font-semibold hover:bg-blue-500"
             >
-              I've saved the key, close this
+              I&apos;ve saved the key, close this
             </button>
           </div>
         </div>

@@ -2,7 +2,8 @@
 
 import { useAuth } from "@/src/lib/AuthContext";
 import { useRouter, usePathname } from "next/navigation";
-import { useEffect, useState, ReactNode } from "react";
+import { useEffect, useRef, useState, ReactNode } from "react";
+
 import {
   collection,
   query,
@@ -25,7 +26,6 @@ import {
   Menu,
   X,
   User,
-  ChevronDown,
 } from "lucide-react";
 
 interface LayoutProps {
@@ -75,7 +75,12 @@ export function Layout({
     }
   }, [user, loading, requireAuth, router]);
 
+  const isInitialMount = useRef(true);
   useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
     setMobileMenuOpen(false);
   }, [pathname]);
 

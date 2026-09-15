@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import {
   collection,
   query,
@@ -37,7 +37,7 @@ export default function MyReportsPage() {
   const { user, profile } = useAuth();
 
   const [reports, setReports] = useState<ReportItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
 
   const [lastDoc, setLastDoc] =
@@ -51,9 +51,18 @@ export default function MyReportsPage() {
   const [severity, setSeverity] = useState("");
   const [status, setStatus] = useState("");
 
+  const userRef = useRef(user);
+  const profileRef = useRef(profile);
+  const lastDocRef = useRef(lastDoc);
+  useEffect(() => { userRef.current = user; }, [user]);
+  useEffect(() => { profileRef.current = profile; }, [profile]);
+  useEffect(() => { lastDocRef.current = lastDoc; }, [lastDoc]);
+
   const loadReports = useCallback(
     async (isLoadMore = false) => {
-      if (!user || !profile?.organizationId) {
+      const currentUser = userRef.current;
+      const currentProfile = profileRef.current;
+      if (!currentUser || !currentProfile?.organizationId) {
         setLoading(false);
         return;
       }
@@ -68,19 +77,19 @@ export default function MyReportsPage() {
         setError("");
 
         const reportsQuery =
-          isLoadMore && lastDoc
+          isLoadMore && lastDocRef.current
             ? query(
                 collection(db, "reports"),
-                where("organizationId", "==", profile.organizationId),
-                where("createdBy", "==", user.uid),
+                where("organizationId", "==", currentProfile.organizationId),
+                where("createdBy", "==", currentUser.uid),
                 orderBy("createdAt", "desc"),
-                startAfter(lastDoc),
+                startAfter(lastDocRef.current),
                 limit(PAGE_SIZE)
               )
             : query(
                 collection(db, "reports"),
-                where("organizationId", "==", profile.organizationId),
-                where("createdBy", "==", user.uid),
+                where("organizationId", "==", currentProfile.organizationId),
+                where("createdBy", "==", currentUser.uid),
                 orderBy("createdAt", "desc"),
                 limit(PAGE_SIZE)
               );
@@ -117,23 +126,22 @@ export default function MyReportsPage() {
         setLoadingMore(false);
       }
     },
-    [
-      user,
-      profile?.organizationId,
-      lastDoc,
-    ]
+    []
   );
 
+  const hasLoadedRef = useRef(false);
   useEffect(() => {
-    if (user && profile?.organizationId) {
-      loadReports(false);
-    } else if (user && profile && !profile.organizationId) {
+    const currentUser = userRef.current;
+    const currentProfile = profileRef.current;
+    if (!currentUser) return;
+    if (!currentProfile?.organizationId) {
       setLoading(false);
+      return;
     }
-  }, [
-    user,
-    profile?.organizationId,
-  ]);
+    if (hasLoadedRef.current) return;
+    hasLoadedRef.current = true;
+    loadReports(false);
+  }, [user, profile?.organizationId, loadReports]);
 
   const filtered = reports.filter((report) => {
     if (category && report.category !== category) {

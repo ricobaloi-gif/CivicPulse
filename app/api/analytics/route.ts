@@ -12,7 +12,12 @@ function toDate(value: unknown): Date | null {
   if (!value) return null;
   if (value instanceof Date) return value;
   if (value instanceof Timestamp) return value.toDate();
-  if (typeof value === "object" && value !== null && "toDate" in value && typeof (value as { toDate?: unknown }).toDate === "function") {
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "toDate" in value &&
+    typeof (value as Record<string, unknown>).toDate === "function"
+  ) {
     return (value as { toDate: () => Date }).toDate();
   }
   const date = new Date(value as string | number);
