@@ -1,33 +1,46 @@
 import { NextRequest } from "next/server";
-import { getAuth, Auth } from "firebase-admin/auth";
-import { DocumentSnapshot } from "firebase-admin/firestore";
-import { adminDb } from "@/src/lib/apiAuth";
-import { revokeApiKey, updateApiKeyName } from "@/src/lib/apiAuth";
-import { createAuditLog } from "@/src/lib/auditLog";
-import { success, error, validationError, unauthorized, notFound, internalError } from "@/src/lib/apiResponse";
+import { getAuth } from "firebase-admin/auth";
+import {
+  adminDb,
+  getAdminApp,
+  revokeApiKey,
+  updateApiKeyName,
+} from "@/src/lib/apiAuth";
+import {
+  success,
+  validationError,
+  unauthorized,
+  notFound,
+  internalError,
+} from "@/src/lib/apiResponse";
 
 export const dynamic = "force-dynamic";
 
-let adminAuthInstance: Auth | null = null;
-function getAdminAuth(): Auth {
-  if (!adminAuthInstance) {
-    adminAuthInstance = getAuth();
-  }
-  return adminAuthInstance;
-}
+type AdminAuthContext = {
+  uid: string;
+  organizationId: string;
+  name: string;
+  role: string;
+};
 
-async function verifyAdminAuth(request: NextRequest): Promise<{ uid: string; organizationId: string } | null> {
+async function verifyAdminAuth(
+  request: NextRequest
+): Promise<AdminAuthContext | null> {
   const authHeader = request.headers.get("Authorization");
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+
+  if (!authHeader?.startsWith("Bearer ")) {
     return null;
   }
 
-  const token = authHeader.slice(7);
-  try {
-    const decodedToken = await getAdminAuth().verifyIdToken(token);
-    const uid = decodedToken.uid;
+  const token = authHeader.slice(7).trim();
+  if (!token) {
+    return null;
+  }
 
-    const userDoc = await adminDb.collection("users").doc(uid).get();
+  try {
+    const decodedToken = await getAuth(getAdminApp()).verifyIdToken(token);
+    const userDoc = await adminDb.collection("users").doc(decodedToken.uid).get();
+
     if (!userDoc.exists) {
       return null;
     }
@@ -36,17 +49,70 @@ async function verifyAdminAuth(request: NextRequest): Promise<{ uid: string; org
     if (!userData) {
       return null;
     }
-    const organizationId = userData.organizationId as string;
-    const orgRole = userData.organizationRole as string;
 
-    if (!organizationId || (orgRole !== "owner" && orgRole !== "admin")) {
+    const organizationId =
+      typeof userData.organizationId === "string"
+        ? userData.organizationId
+        : "";
+
+    const organizationRole =
+      typeof userData.organizationRole === "string"
+        ? userData.organizationRole
+        : "";
+
+    const role =
+      typeof userData.role === "string"
+        ? userData.role
+        : "";
+
+    const name =
+      typeof userData.name === "string" && userData.name.trim()
+        ? userData.name.trim()
+        : "Admin";
+
+    const isAdminRole = role === "admin";
+    const isOrganizationAdmin =
+      organizationRole === "owner" || organizationRole === "admin";
+
+    if (!organizationId || !isAdminRole || !isOrganizationAdmin) {
       return null;
     }
 
-    return { uid, organizationId };
-  } catch {
+    return {
+      uid: decodedToken.uid,
+      organizationId,
+      name,
+      role,
+    };
+  } catch (err) {
+    console.error("Admin API key auth verification failed:", err);
     return null;
   }
+}
+
+async function writeApiKeyAuditLog(params: {
+  organizationId: string;
+  action: "api_key_revoked" | "api_key_renamed";
+  apiKeyId: string;
+  performedBy: string;
+  performedByName: string;
+  performedByRole: string;
+  metadata?: Record<string, unknown>;
+}) {
+  await adminDb.collection("auditLogs").add({
+    organizationId: params.organizationId,
+    action: "org_settings_changed",
+    entityType: "apiKey",
+    entityId: params.apiKeyId,
+    performedBy: params.performedBy,
+    performedByName: params.performedByName,
+    performedByRole: params.performedByRole,
+    metadata: {
+      action: params.action,
+      ...(params.metadata ?? {}),
+    },
+    createdAt: new Date(),
+  });
 }
 
 export async function DELETE(
@@ -54,6 +120,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+
   const auth = await verifyAdminAuth(request);
   if (!auth) {
     return unauthorized("Admin authentication required");
@@ -61,23 +128,21 @@ export async function DELETE(
 
   try {
     const result = await revokeApiKey(id, auth.organizationId);
+
     if (!result) {
       return notFound("API key not found");
     }
 
-    await createAuditLog({
+    await writeApiKeyAuditLog({
       organizationId: auth.organizationId,
-      action: "org_settings_changed",
-      entityType: "apiKey",
-      entityId: id,
+      action: "api_key_revoked",
+      apiKeyId: id,
       performedBy: auth.uid,
-      performedByName: "Admin",
-      performedByRole: "admin",
-      metadata: { action: "api_key_revoked" },
+      performedByName: auth.name,
+      performedByRole: auth.role,
     });
 
-    const response = success({ message: "API key revoked" });
-    return response;
+    return success({ message: "API key revoked" });
   } catch (err) {
     console.error("Admin DELETE /api-keys/[id] error:", err);
     return internalError("Failed to revoke API key");
@@ -89,12 +154,14 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+
   const auth = await verifyAdminAuth(request);
   if (!auth) {
     return unauthorized("Admin authentication required");
   }
 
   let body: unknown;
+
   try {
     body = await request.json();
   } catch {
@@ -105,34 +172,43 @@ export async function PATCH(
     return validationError("Request body must be a JSON object");
   }
 
-  const b = body as Record<string, unknown>;
-  if (!b.name || typeof b.name !== "string" || b.name.trim().length === 0) {
+  const requestBody = body as Record<string, unknown>;
+  const rawName = requestBody.name;
+
+  if (typeof rawName !== "string" || rawName.trim().length === 0) {
     return validationError("Name is required");
   }
 
-  if (b.name.trim().length > 100) {
+  const name = rawName.trim();
+
+  if (name.length > 100) {
     return validationError("Name must be 100 characters or less");
   }
 
   try {
-    const result = await updateApiKeyName(id, auth.organizationId, b.name.trim());
+    const result = await updateApiKeyName(
+      id,
+      auth.organizationId,
+      name
+    );
+
     if (!result) {
       return notFound("API key not found");
     }
 
-    await createAuditLog({
+    await writeApiKeyAuditLog({
       organizationId: auth.organizationId,
-      action: "org_settings_changed",
-      entityType: "apiKey",
-      entityId: id,
+      action: "api_key_renamed",
+      apiKeyId: id,
       performedBy: auth.uid,
-      performedByName: "Admin",
-      performedByRole: "admin",
-      metadata: { action: "api_key_renamed", newName: b.name.trim() },
+      performedByName: auth.name,
+      performedByRole: auth.role,
+      metadata: {
+        newName: name,
+      },
     });
 
-    const response = success({ message: "API key name updated" });
-    return response;
+    return success({ message: "API key name updated" });
   } catch (err) {
     console.error("Admin PATCH /api-keys/[id] error:", err);
     return internalError("Failed to update API key name");
