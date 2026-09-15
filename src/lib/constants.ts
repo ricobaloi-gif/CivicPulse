@@ -233,6 +233,44 @@ export const MODERATION_REASONS = [
   "irrelevant",
 ] as const;
 
+export const MODERATION_STATUSES = [
+  "normal",
+  "under-review",
+  "hidden",
+  "rejected",
+] as const;
+
+export const DISPUTE_STATUSES = [
+  "none",
+  "submitted",
+  "under-review",
+  "accepted",
+  "rejected",
+] as const;
+
+export const AUDIT_ACTIONS = [
+  "status_changed",
+  "case_assigned",
+  "case_reassigned",
+  "assignment_removed",
+  "report_escalated",
+  "report_resolved",
+  "report_reopened",
+  "dispute_reviewed",
+  "moderation_performed",
+  "member_added",
+  "member_removed",
+  "invite_created",
+  "invite_cancelled",
+  "invite_accepted",
+  "org_settings_changed",
+  "report_created",
+  "trust_score_updated",
+  "export_generated",
+  "area_created",
+  "area_updated",
+] as const;
+
 // ─── SLA Defaults ───────────────────────────────────────
 
 export const DEFAULT_SLA = {

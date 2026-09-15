@@ -3,9 +3,9 @@ import { FieldValue, DocumentSnapshot, Query } from "firebase-admin/firestore";
 import { validateApiKey } from "@/src/lib/apiAuth";
 import { checkRateLimit, addRateLimitHeaders, createRateLimitedResponse } from "@/src/lib/rateLimit";
 import { success, error, validationError, unauthorized, notFound, internalError, forbidden } from "@/src/lib/apiResponse";
-import { STATUSES, SEVERITIES } from "@/src/lib/constants";
+import { STATUSES, SEVERITIES, MODERATION_REASONS, MODERATION_STATUSES, DISPUTE_STATUSES } from "@/src/lib/constants";
 import { adminDb } from "@/src/lib/apiAuth";
-import type { ReportStatus } from "@/src/lib/types";
+import type { ReportStatus, ModerationStatus, DisputeStatus } from "@/src/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -126,6 +126,11 @@ interface UpdateReportInput {
   escalationLevel?: number;
   areaId?: string | null;
   resolutionNote?: string;
+  resolutionImageUrls?: string[];
+  moderationStatus?: string;
+  moderationReason?: string | null;
+  disputeStatus?: string;
+  disputeReason?: string | null;
 }
 
 function validateUpdateReport(body: unknown): { valid: boolean; data?: UpdateReportInput; errors?: string[] } {
@@ -173,6 +178,43 @@ function validateUpdateReport(body: unknown): { valid: boolean; data?: UpdateRep
     }
   }
 
+  if (b.resolutionImageUrls !== undefined) {
+    if (b.resolutionImageUrls !== null && (!Array.isArray(b.resolutionImageUrls) || b.resolutionImageUrls.length > 10)) {
+      errors.push("Resolution image URLs must be an array (max 10 images)");
+    } else if (Array.isArray(b.resolutionImageUrls)) {
+      for (const url of b.resolutionImageUrls) {
+        if (typeof url !== "string" || !url.startsWith("http")) {
+          errors.push("Each resolution image URL must be a valid HTTP/HTTPS URL");
+          break;
+        }
+      }
+    }
+  }
+
+  if (b.moderationStatus !== undefined) {
+    if (b.moderationStatus !== null && (typeof b.moderationStatus !== "string" || !MODERATION_STATUSES.includes(b.moderationStatus as ModerationStatus))) {
+      errors.push(`Invalid moderation status. Must be one of: ${MODERATION_STATUSES.join(", ")}`);
+    }
+  }
+
+  if (b.moderationReason !== undefined) {
+    if (b.moderationReason !== null && (typeof b.moderationReason !== "string" || !MODERATION_REASONS.includes(b.moderationReason as typeof MODERATION_REASONS[number]))) {
+      errors.push(`Invalid moderation reason. Must be one of: ${MODERATION_REASONS.join(", ")}`);
+    }
+  }
+
+  if (b.disputeStatus !== undefined) {
+    if (b.disputeStatus !== null && (typeof b.disputeStatus !== "string" || !DISPUTE_STATUSES.includes(b.disputeStatus as DisputeStatus))) {
+      errors.push(`Invalid dispute status. Must be one of: ${DISPUTE_STATUSES.join(", ")}`);
+    }
+  }
+
+  if (b.disputeReason !== undefined) {
+    if (b.disputeReason !== null && (typeof b.disputeReason !== "string" || b.disputeReason.length > 5000)) {
+      errors.push("Dispute reason must be a string (max 5000 characters) or null");
+    }
+  }
+
   if (errors.length > 0) {
     return { valid: false, errors };
   }
@@ -186,6 +228,11 @@ function validateUpdateReport(body: unknown): { valid: boolean; data?: UpdateRep
       escalationLevel: b.escalationLevel as number | undefined,
       areaId: b.areaId as string | undefined,
       resolutionNote: b.resolutionNote as string | undefined,
+      resolutionImageUrls: b.resolutionImageUrls as string[] | undefined,
+      moderationStatus: b.moderationStatus as string | undefined,
+      moderationReason: b.moderationReason as string | undefined,
+      disputeStatus: b.disputeStatus as string | undefined,
+      disputeReason: b.disputeReason as string | undefined,
     },
   };
 }
@@ -320,6 +367,86 @@ export async function PATCH(
 
     if (updates.resolutionNote !== undefined) {
       updateData.resolutionNote = updates.resolutionNote;
+    }
+
+    if (updates.resolutionImageUrls !== undefined) {
+      updateData.resolutionImageUrls = updates.resolutionImageUrls;
+    }
+
+    const isAdmin = apiKey.permissions.includes("moderateReports") || apiKey.permissions.includes("*");
+    const isCreator = reportData.createdBy === apiKey.createdBy;
+
+    // Dispute handling
+    if (updates.disputeStatus !== undefined || updates.disputeReason !== undefined) {
+      const currentDisputeStatus = reportData.disputeStatus as string || "none";
+      const currentReportStatus = reportData.status as string;
+
+      // Only report creator can submit a dispute
+      if (!isCreator) {
+        return forbidden("Only the report creator can submit a dispute");
+      }
+
+      // Can only dispute resolved/verified reports
+      if (!["resolved", "verified"].includes(currentReportStatus)) {
+        return validationError("Can only dispute resolved or verified reports");
+      }
+
+      // Can only submit dispute if no active dispute
+      if (updates.disputeStatus === "submitted" && currentDisputeStatus !== "none") {
+        return validationError("A dispute has already been submitted for this report");
+      }
+
+      // Handle dispute submission
+      if (updates.disputeStatus === "submitted") {
+        updateData.disputeStatus = "submitted";
+        updateData.disputedAt = new Date();
+        updateData.disputedBy = apiKey.createdBy;
+        if (updates.disputeReason !== undefined) {
+          updateData.disputeReason = updates.disputeReason;
+        }
+        // Add to status history
+        const existingHistory = (reportData.statusHistory as Array<{ status: string; changedAt: Date; changedBy: string }>) || [];
+        updateData.statusHistory = [
+          ...existingHistory,
+          {
+            status: "disputed",
+            changedAt: new Date(),
+            changedBy: apiKey.createdBy,
+          },
+        ];
+      }
+    }
+
+    // Admin dispute review
+    if (isAdmin && (updates.disputeStatus === "accepted" || updates.disputeStatus === "rejected")) {
+      if (updates.disputeStatus === "accepted") {
+        // Accept dispute: reopen the report
+        updateData.status = "reopened";
+        updateData.disputeStatus = "accepted";
+        const existingHistory = (reportData.statusHistory as Array<{ status: string; changedAt: Date; changedBy: string }>) || [];
+        updateData.statusHistory = [
+          ...existingHistory,
+          {
+            status: "reopened",
+            changedAt: new Date(),
+            changedBy: apiKey.createdBy,
+          },
+        ];
+      } else if (updates.disputeStatus === "rejected") {
+        // Reject dispute: keep report resolved
+        updateData.disputeStatus = "rejected";
+      }
+    }
+
+    if (isAdmin) {
+      if (updates.moderationStatus !== undefined) {
+        updateData.moderationStatus = updates.moderationStatus;
+        updateData.moderatedAt = new Date();
+        updateData.moderatedBy = apiKey.createdBy;
+      }
+      if (updates.moderationReason !== undefined) {
+        updateData.moderationReason = updates.moderationReason;
+      }
     }
 
     await reportRef.update(updateData);

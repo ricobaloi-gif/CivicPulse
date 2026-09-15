@@ -32,8 +32,15 @@ import {
   requestEscalation,
   clearEscalation,
 } from "@/src/lib/escalation";
-import { formatRelativeTime } from "@/src/lib/constants";
+import { formatRelativeTime, formatDateTime } from "@/src/lib/constants";
 import type { Area } from "@/src/lib/types";
+import {
+  CheckCircle,
+  Clock,
+  User,
+  AlertTriangle,
+  Target,
+} from "lucide-react";
 
 type StatusHistoryItem = {
   status: string;
@@ -84,6 +91,29 @@ type Report = {
   updatedAt?: Timestamp;
 
   statusHistory?: StatusHistoryItem[];
+
+  // Moderation
+  moderationStatus?: string;
+  moderationReason?: string | null;
+  moderatedBy?: string | null;
+  moderatedAt?: Timestamp | null;
+
+  // Resolution evidence
+  resolutionNote?: string | null;
+  resolvedAt?: Timestamp | null;
+  resolvedBy?: string | null;
+  resolutionImageUrls?: string[];
+
+  // SLA timestamps
+  submittedAt?: Timestamp | null;
+  acknowledgedAt?: Timestamp | null;
+  workStartedAt?: Timestamp | null;
+
+  // Dispute
+  disputeStatus?: string;
+  disputeReason?: string | null;
+  disputedAt?: Timestamp | null;
+  disputedBy?: string | null;
 };
 
 type UserProfile = {
@@ -230,6 +260,15 @@ function formatTimestamp(value?: Timestamp | Date | null) {
   return "Time unavailable";
 }
 
+function toDate(value?: Timestamp | Date | null): Date {
+  if (!value) return new Date(0);
+  if (value instanceof Date) return value;
+  if (typeof value === "object" && typeof value.toDate === "function") {
+    return value.toDate();
+  }
+  return new Date(0);
+}
+
 export default function ReportDetailsPage() {
   const params = useParams();
   const router = useRouter();
@@ -267,6 +306,11 @@ export default function ReportDetailsPage() {
   const [escalationLevelInput, setEscalationLevelInput] = useState(1);
   const [escalationReasonInput, setEscalationReasonInput] = useState("");
   const [staffEscalationReason, setStaffEscalationReason] = useState("");
+
+  const [showModerationModal, setShowModerationModal] = useState(false);
+  const [moderationStatusInput, setModerationStatusInput] = useState("under-review");
+  const [moderationReasonInput, setModerationReasonInput] = useState("");
+  const [moderating, setModerating] = useState(false);
 
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -756,6 +800,63 @@ export default function ReportDetailsPage() {
     }
   }
 
+  // Moderation
+  async function handleModerationSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!user || !isAdmin || !report || !report.organizationId) return;
+
+    const trimmedReason = moderationReasonInput.trim();
+    if (!trimmedReason) {
+      setError("Please provide a moderation reason.");
+      return;
+    }
+
+    try {
+      setModerating(true);
+      setError("");
+      setSuccess("");
+
+      const reportRef = doc(db, "reports", reportId);
+      await updateDoc(reportRef, {
+        moderationStatus: moderationStatusInput,
+        moderationReason: trimmedReason,
+        moderatedBy: user.uid,
+        moderatedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+
+      if (report.createdBy !== user.uid) {
+        await createNotification({
+          userId: report.createdBy,
+          createdBy: user.uid,
+          type: "system",
+          title: "Report Moderated",
+          message: `Your report "${report.title}" has been moderated (${moderationStatusInput}). Reason: ${trimmedReason}`,
+          reportId,
+        });
+      }
+
+      await createNotification({
+        userId: user.uid,
+        createdBy: user.uid,
+        type: "system",
+        title: "Moderation Action Recorded",
+        message: `Report "${report.title}" moderated as ${moderationStatusInput}.`,
+        reportId,
+      });
+
+      setSuccess(`Report moderated as ${moderationStatusInput}.`);
+      setShowModerationModal(false);
+      setModerationReasonInput("");
+      await loadReport();
+    } catch (err: unknown) {
+      console.error("Moderation error:", err);
+      setError(err instanceof Error ? err.message : "Failed to moderate report.");
+    } finally {
+      setModerating(false);
+    }
+  }
+
   // Internal case note
   async function handleAddCaseNote() {
     if (!user || !canManageCase) return;
@@ -831,6 +932,64 @@ export default function ReportDetailsPage() {
       setError("Failed to post comment.");
     } finally {
       setAddingComment(false);
+    }
+  }
+
+  // Dispute handling
+  const [showDisputeModal, setShowDisputeModal] = useState(false);
+  const [disputeReasonInput, setDisputeReasonInput] = useState("");
+  const [disputing, setDisputing] = useState(false);
+
+  async function handleDisputeSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!user || !isOwner || !report || !report.organizationId) return;
+
+    const trimmedReason = disputeReasonInput.trim();
+    if (!trimmedReason) {
+      setError("Please provide a reason for disputing the resolution.");
+      return;
+    }
+
+    try {
+      setDisputing(true);
+      setError("");
+      setSuccess("");
+
+      const reportRef = doc(db, "reports", reportId);
+      await updateDoc(reportRef, {
+        disputeStatus: "submitted",
+        disputeReason: trimmedReason,
+        disputedAt: serverTimestamp(),
+        disputedBy: user.uid,
+        updatedAt: serverTimestamp(),
+      });
+
+      // Notify admins
+      const orgRef = doc(db, "organizations", report.organizationId);
+      const orgSnap = await getDoc(orgRef);
+      if (orgSnap.exists()) {
+        const orgData = orgSnap.data();
+        if (orgData.ownerId) {
+          await createNotification({
+            userId: orgData.ownerId,
+            createdBy: user.uid,
+            type: "dispute",
+            title: "Report Disputed",
+            message: `The resolution for "${report.title}" has been disputed by the reporter. Reason: ${trimmedReason}`,
+            reportId,
+          });
+        }
+      }
+
+      setSuccess("Dispute submitted. Administrators have been notified and will review your case.");
+      setShowDisputeModal(false);
+      setDisputeReasonInput("");
+      await loadReport();
+    } catch (err: unknown) {
+      console.error("Dispute error:", err);
+      setError(err instanceof Error ? err.message : "Failed to submit dispute.");
+    } finally {
+      setDisputing(false);
     }
   }
 
@@ -1070,6 +1229,54 @@ export default function ReportDetailsPage() {
               </div>
             </div>
 
+            {/* SLA Timing Metrics */}
+            {(report.submittedAt || report.acknowledgedAt || report.assignedAt || report.workStartedAt || report.resolvedAt) && (
+              <section className="mt-6 rounded-2xl border border-blue-800/30 bg-blue-950/20 p-4">
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-blue-400 flex items-center gap-2">
+                  <Target className="h-4 w-4" />
+                  SLA Timeline
+                </h3>
+                <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                  {report.submittedAt && (
+                    <div className="rounded-xl bg-gray-900/50 p-3">
+                      <p className="text-[10px] text-gray-500 uppercase tracking-wider">Submitted</p>
+                      <p className="mt-1 text-sm font-mono text-white">{formatDateTime(report.submittedAt)}</p>
+                    </div>
+                  )}
+                  {report.acknowledgedAt && (
+                    <div className="rounded-xl bg-gray-900/50 p-3">
+                      <p className="text-[10px] text-gray-500 uppercase tracking-wider">Acknowledged</p>
+                      <p className="mt-1 text-sm font-mono text-white">{formatDateTime(report.acknowledgedAt)}</p>
+                      <p className="mt-1 text-xs text-green-400">
+                        {report.submittedAt ? `${((toDate(report.acknowledgedAt).getTime() - toDate(report.submittedAt).getTime()) / (1000 * 60 * 60)).toFixed(1)}h` : ""}
+                      </p>
+                    </div>
+                  )}
+                  {report.assignedAt && (
+                    <div className="rounded-xl bg-gray-900/50 p-3">
+                      <p className="text-[10px] text-gray-500 uppercase tracking-wider">Assigned</p>
+                      <p className="mt-1 text-sm font-mono text-white">{formatDateTime(report.assignedAt)}</p>
+                    </div>
+                  )}
+                  {report.workStartedAt && (
+                    <div className="rounded-xl bg-gray-900/50 p-3">
+                      <p className="text-[10px] text-gray-500 uppercase tracking-wider">Work Started</p>
+                      <p className="mt-1 text-sm font-mono text-white">{formatDateTime(report.workStartedAt)}</p>
+                    </div>
+                  )}
+                  {report.resolvedAt && (
+                    <div className="rounded-xl bg-gray-900/50 p-3">
+                      <p className="text-[10px] text-gray-500 uppercase tracking-wider">Resolved</p>
+                      <p className="mt-1 text-sm font-mono text-white">{formatDateTime(report.resolvedAt)}</p>
+                      <p className="mt-1 text-xs text-green-400">
+                        {report.submittedAt ? `${((toDate(report.resolvedAt).getTime() - toDate(report.submittedAt).getTime()) / (1000 * 60 * 60)).toFixed(1)}h total` : ""}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </section>
+            )}
+
             {/* Assigned Case Worker Card */}
             {report.assignedTo && (
               <div className="mt-6 rounded-xl border border-indigo-900 bg-indigo-950/20 p-5">
@@ -1259,6 +1466,92 @@ export default function ReportDetailsPage() {
               </section>
             )}
 
+            {/* Admin Moderation Actions */}
+            {isAdmin && (
+              <section className="mt-6 rounded-2xl border border-purple-900 bg-purple-950/20 p-6">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-purple-400">
+                      Moderation
+                    </p>
+                    <h2 className="mt-1 text-xl font-bold">Moderate Report Content</h2>
+                    <p className="mt-1 text-xs text-gray-400">
+                      Review and take action on reported content that may violate guidelines.
+                    </p>
+                  </div>
+                  {report.moderationStatus && report.moderationStatus !== "normal" && (
+                    <span className="rounded-full border border-purple-800 bg-purple-950/40 px-3 py-1 text-xs font-semibold text-purple-300">
+                      Current: {report.moderationStatus}
+                    </span>
+                  )}
+                </div>
+
+                <div className="mt-4 flex flex-wrap gap-3">
+                  {report.moderationStatus === "normal" || !report.moderationStatus ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setModerationStatusInput("under-review");
+                        setModerationReasonInput("");
+                        setShowModerationModal(true);
+                      }}
+                      className="rounded-lg border border-purple-800 bg-purple-950/40 px-4 py-2 text-xs font-semibold text-purple-300 hover:bg-purple-900"
+                    >
+                      🛡️ Start Moderation Review
+                    </button>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setModerationStatusInput("hidden");
+                          setModerationReasonInput(report.moderationReason || "");
+                          setShowModerationModal(true);
+                        }}
+                        className="rounded-lg border border-red-800 bg-red-950/40 px-4 py-2 text-xs font-semibold text-red-300 hover:bg-red-900"
+                      >
+                        🚫 Hide Report
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setModerationStatusInput("rejected");
+                          setModerationReasonInput(report.moderationReason || "");
+                          setShowModerationModal(true);
+                        }}
+                        className="rounded-lg border border-orange-800 bg-orange-950/40 px-4 py-2 text-xs font-semibold text-orange-300 hover:bg-orange-900"
+                      >
+                        ❌ Reject Report
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setModerationStatusInput("normal");
+                          setModerationReasonInput("Content reviewed and cleared");
+                          setShowModerationModal(true);
+                        }}
+                        className="rounded-lg border border-green-800 bg-green-950/40 px-4 py-2 text-xs font-semibold text-green-300 hover:bg-green-900"
+                      >
+                        ✅ Clear Moderation
+                      </button>
+                    </>
+                  )}
+                </div>
+
+                {report.moderationReason && (
+                  <div className="mt-4 p-3 rounded-lg bg-gray-900 border border-gray-800">
+                    <p className="text-xs font-semibold text-gray-400">Moderation Reason:</p>
+                    <p className="mt-1 text-sm text-gray-300">{report.moderationReason}</p>
+                    {report.moderatedAt && (
+                      <p className="mt-1 text-xs text-gray-500">
+                        Moderated {formatTimestamp(report.moderatedAt)}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </section>
+            )}
+
             {/* Internal Case Notes (Staff & Admin Only) */}
             {canManageCase && (
               <section className="mt-6 rounded-2xl border border-emerald-900 bg-emerald-950/10 p-6">
@@ -1394,6 +1687,102 @@ export default function ReportDetailsPage() {
                 )}
               </div>
             </section>
+
+            {/* Resolution Evidence (Visible to all when resolved) */}
+            {(report.status === "resolved" || report.status === "verified") && (report.resolutionNote || report.resolutionImageUrls?.length) && (
+              <section className="mt-8 rounded-2xl border border-success/30 bg-success-muted/20 p-6">
+                <div className="flex items-center gap-2">
+                  <CheckCircle className="h-5 w-5 text-success" />
+                  <h2 className="text-xl font-bold">Resolution Evidence</h2>
+                </div>
+                <p className="mt-1 text-xs text-gray-400">
+                  Evidence provided when this report was marked as resolved.
+                </p>
+
+                {report.resolutionNote && (
+                  <div className="mt-4 p-4 rounded-xl bg-gray-900 border border-gray-800">
+                    <p className="text-xs font-semibold text-gray-400">Resolution Note</p>
+                    <p className="mt-2 whitespace-pre-wrap text-sm text-gray-300">{report.resolutionNote}</p>
+                  </div>
+                )}
+
+                {report.resolvedAt && (
+                  <div className="mt-4 flex flex-wrap items-center gap-4 text-xs text-gray-400">
+                    <span className="flex items-center gap-1">
+                      <Clock className="h-3.5 w-3.5" />
+                      Resolved {formatRelativeTime(report.resolvedAt)}
+                    </span>
+                    {report.resolvedBy && (
+                      <span className="flex items-center gap-1">
+                        <User className="h-3.5 w-3.5" />
+                        Resolved by staff
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {report.resolutionImageUrls && report.resolutionImageUrls.length > 0 && (
+                  <div className="mt-4">
+                    <p className="text-xs font-semibold text-gray-400">Before / After Photos</p>
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                      {report.resolutionImageUrls.map((url, index) => (
+                        <div key={index} className="rounded-xl border border-gray-800 overflow-hidden">
+                          <img
+                            src={url}
+                            alt={`Resolution evidence ${index + 1}`}
+                            className="h-48 w-full object-cover"
+                            loading="lazy"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </section>
+            )}
+
+            {/* Dispute Resolution (For report creator when resolved) */}
+            {isOwner && (report.status === "resolved" || report.status === "verified") && report.disputeStatus !== "submitted" && report.disputeStatus !== "under-review" && (
+              <section className="mt-8 rounded-2xl border border-warning/30 bg-warning-muted/20 p-6">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="h-5 w-5 text-warning" />
+                  <h2 className="text-xl font-bold">Dispute Resolution</h2>
+                </div>
+                <p className="mt-1 text-xs text-gray-400">
+                  If you believe this report was resolved incorrectly or the issue persists, you can submit a dispute for administrative review.
+                </p>
+
+                {report.disputeStatus === "accepted" && (
+                  <div className="mt-4 p-4 rounded-xl bg-green-950/30 border border-green-800">
+                    <p className="text-sm font-semibold text-green-300">✅ Dispute Accepted - Report Reopened</p>
+                    <p className="mt-1 text-xs text-gray-400">Your dispute was reviewed and accepted. The report has been reopened for further action.</p>
+                    {report.disputeReason && (
+                      <p className="mt-2 text-xs text-gray-300">Your reason: {report.disputeReason}</p>
+                    )}
+                  </div>
+                )}
+
+                {report.disputeStatus === "rejected" && (
+                  <div className="mt-4 p-4 rounded-xl bg-red-950/30 border border-red-800">
+                    <p className="text-sm font-semibold text-red-300">❌ Dispute Rejected</p>
+                    <p className="mt-1 text-xs text-gray-400">Your dispute was reviewed and rejected. The resolution stands.</p>
+                    {report.disputeReason && (
+                      <p className="mt-2 text-xs text-gray-300">Your reason: {report.disputeReason}</p>
+                    )}
+                  </div>
+                )}
+
+                {report.disputeStatus === "none" && (
+                  <button
+                    type="button"
+                    onClick={() => setShowDisputeModal(true)}
+                    className="mt-4 rounded-lg border border-warning/30 bg-warning-muted/20 px-4 py-2 text-xs font-semibold text-warning hover:bg-warning-muted hover:border-warning/50"
+                  >
+                    📋 Submit Dispute
+                  </button>
+                )}
+              </section>
+            )}
 
             {/* Timeline */}
             <section className="mt-8">
@@ -1582,6 +1971,133 @@ export default function ReportDetailsPage() {
                     className="rounded-xl bg-orange-600 px-5 py-2 text-sm font-semibold text-white hover:bg-orange-500 disabled:opacity-50"
                   >
                     {escalating ? "Submitting..." : "Submit Escalation Request"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Moderation Modal */}
+        {showModerationModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
+            <div className="w-full max-w-lg rounded-2xl border border-purple-900 bg-gray-900 p-6">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xl font-bold text-white">🛡️ Moderate Report</h3>
+                <button
+                  type="button"
+                  onClick={() => setShowModerationModal(false)}
+                  className="text-gray-400 hover:text-white"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <form onSubmit={handleModerationSubmit} className="mt-5 space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400">
+                    Moderation Action
+                  </label>
+                  <select
+                    value={moderationStatusInput}
+                    onChange={(e) => setModerationStatusInput(e.target.value)}
+                    className="mt-1 w-full rounded-xl border border-gray-700 bg-gray-950 px-3 py-2.5 text-sm outline-none focus:border-purple-500"
+                  >
+                    <option value="under-review">Under Review</option>
+                    <option value="hidden">Hide Report (Hidden from public)</option>
+                    <option value="rejected">Reject Report (Mark as invalid)</option>
+                    <option value="normal">Clear Moderation (Restore to normal)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400">
+                    Reason *
+                  </label>
+                  <select
+                    value={moderationReasonInput}
+                    onChange={(e) => setModerationReasonInput(e.target.value)}
+                    className="mt-1 w-full rounded-xl border border-gray-700 bg-gray-950 px-3 py-2.5 text-sm outline-none focus:border-purple-500"
+                  >
+                    <option value="">Select a reason...</option>
+                    <option value="spam">Spam</option>
+                    <option value="fake-report">Fake Report</option>
+                    <option value="offensive-content">Offensive Content</option>
+                    <option value="duplicate">Duplicate</option>
+                    <option value="invalid-location">Invalid Location</option>
+                    <option value="irrelevant">Irrelevant Report</option>
+                  </select>
+                </div>
+
+                <div className="flex justify-end gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowModerationModal(false)}
+                    className="rounded-xl border border-gray-700 px-4 py-2 text-sm text-gray-300 hover:bg-gray-800"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={moderating || !moderationReasonInput.trim()}
+                    className="rounded-xl bg-purple-600 px-5 py-2 text-sm font-semibold text-white hover:bg-purple-500 disabled:opacity-50"
+                  >
+                    {moderating ? "Moderating..." : "Confirm Moderation"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Dispute Modal */}
+        {showDisputeModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
+            <div className="w-full max-w-lg rounded-2xl border border-warning/30 bg-gray-900 p-6">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xl font-bold text-white">📋 Submit Dispute</h3>
+                <button
+                  type="button"
+                  onClick={() => setShowDisputeModal(false)}
+                  className="text-gray-400 hover:text-white"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <p className="mt-2 text-xs text-gray-400">
+                Explain why you believe the resolution is incorrect or the issue persists. Administrators will review your dispute.
+              </p>
+
+              <form onSubmit={handleDisputeSubmit} className="mt-5 space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400">
+                    Dispute Reason *
+                  </label>
+                  <textarea
+                    value={disputeReasonInput}
+                    onChange={(e) => setDisputeReasonInput(e.target.value)}
+                    required
+                    rows={4}
+                    placeholder="Describe why you are disputing this resolution (e.g. issue not actually fixed, temporary fix, incorrect assessment)..."
+                    className="mt-1 w-full resize-none rounded-xl border border-gray-700 bg-gray-950 px-4 py-2.5 text-sm outline-none focus:border-warning-500"
+                  />
+                </div>
+
+                <div className="flex justify-end gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowDisputeModal(false)}
+                    className="rounded-xl border border-gray-700 px-4 py-2 text-sm text-gray-300 hover:bg-gray-800"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={disputing || !disputeReasonInput.trim()}
+                    className="rounded-xl bg-warning-600 px-5 py-2 text-sm font-semibold text-white hover:bg-warning-500 disabled:opacity-50"
+                  >
+                    {disputing ? "Submitting..." : "Submit Dispute"}
                   </button>
                 </div>
               </form>
