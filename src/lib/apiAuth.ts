@@ -1,5 +1,10 @@
 import { initializeApp, getApps, cert, App } from "firebase-admin/app";
-import { getFirestore, Firestore, Timestamp, DocumentData, QueryDocumentSnapshot } from "firebase-admin/firestore";
+import {
+  getFirestore,
+  Firestore,
+  DocumentData,
+  QueryDocumentSnapshot,
+} from "firebase-admin/firestore";
 import { getAuth } from "firebase-admin/auth";
 import { createHash, randomBytes } from "crypto";
 import type { NextRequest } from "next/server";
@@ -131,22 +136,27 @@ export interface ApiKeyValidationResult {
   error?: string;
 }
 
-function toDate(value: unknown): Date | undefined {
-  if (!value) return undefined;
-  if (value instanceof Date) return value;
-  if (value instanceof Timestamp) return value.toDate();
+function hasToDate(value: unknown): value is { toDate: () => Date } {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as { toDate?: unknown };
+  return typeof candidate.toDate === "function";
+}
 
-  if (
-    typeof value === "object" &&
-    value !== null &&
-    "toDate" in value &&
-    typeof (value as Record<string, unknown>).toDate === "function"
-  ) {
-    return (value as { toDate: () => Date }).toDate();
+function toDate(value: unknown): Date | undefined {
+  if (value == null) return undefined;
+  if (value instanceof Date) return value;
+
+  if (hasToDate(value)) {
+    const date = value.toDate();
+    return date instanceof Date && !Number.isNaN(date.getTime()) ? date : undefined;
   }
 
-  const date = new Date(value as string | number);
-  return Number.isNaN(date.getTime()) ? undefined : date;
+  if (typeof value === "string" || typeof value === "number") {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? undefined : date;
+  }
+
+  return undefined;
 }
 
 function mapApiKey(id: string, data: DocumentData): ApiKeyData {
@@ -271,7 +281,9 @@ export async function listApiKeys(
     .orderBy("createdAt", "desc")
     .get();
 
-  return snapshot.docs.map((doc: QueryDocumentSnapshot<DocumentData>) => mapApiKey(doc.id, doc.data()));
+  return snapshot.docs.map((doc: QueryDocumentSnapshot<DocumentData>) =>
+    mapApiKey(doc.id, doc.data())
+  );
 }
 
 export async function revokeApiKey(

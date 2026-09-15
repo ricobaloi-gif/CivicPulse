@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { FieldValue, Query, DocumentSnapshot, QueryDocumentSnapshot, Timestamp } from "firebase-admin/firestore";
+import { FieldValue, Query, DocumentSnapshot, QueryDocumentSnapshot } from "firebase-admin/firestore";
 import { validateApiKey } from "@/src/lib/apiAuth";
 import { checkRateLimit, addRateLimitHeaders, createRateLimitedResponse } from "@/src/lib/rateLimit";
 import { success, error, validationError, unauthorized, notFound, internalError } from "@/src/lib/apiResponse";
@@ -9,22 +9,28 @@ import type { ReportCategory, ReportSeverity, ReportStatus } from "@/src/lib/typ
 
 export const dynamic = "force-dynamic";
 
+function hasToDate(value: unknown): value is { toDate: () => Date } {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as { toDate?: unknown };
+  return typeof candidate.toDate === "function";
+}
+
 function toISOString(value: unknown): string | undefined {
-  if (!value) return undefined;
+  if (value == null) return undefined;
   if (value instanceof Date) return value.toISOString();
-  if (value instanceof Timestamp) return value.toDate().toISOString();
-  if (
-    typeof value === "object" &&
-    value !== null &&
-    "toDate" in value &&
-    typeof (value as Record<string, unknown>).toDate === "function"
-  ) {
-    return (value as { toDate: () => Date }).toDate().toISOString();
+
+  if (hasToDate(value)) {
+    const date = value.toDate();
+    return date instanceof Date && !Number.isNaN(date.getTime())
+      ? date.toISOString()
+      : undefined;
   }
+
   if (typeof value === "string" || typeof value === "number") {
-    const date = new Date(value as string | number);
+    const date = new Date(value);
     return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
   }
+
   return undefined;
 }
 

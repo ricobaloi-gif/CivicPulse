@@ -1,28 +1,38 @@
 import { NextRequest } from "next/server";
-import { Query, DocumentSnapshot, Timestamp } from "firebase-admin/firestore";
+import { Query, DocumentSnapshot } from "firebase-admin/firestore";
 import { validateApiKey } from "@/src/lib/apiAuth";
-import { checkRateLimit, addRateLimitHeaders, createRateLimitedResponse } from "@/src/lib/rateLimit";
-import { success, error, validationError, unauthorized, internalError } from "@/src/lib/apiResponse";
+import {
+  checkRateLimit,
+  addRateLimitHeaders,
+  createRateLimitedResponse,
+} from "@/src/lib/rateLimit";
+import { success, unauthorized, internalError } from "@/src/lib/apiResponse";
 import { adminDb } from "@/src/lib/apiAuth";
 
 export const dynamic = "force-dynamic";
 
+function hasToDate(value: unknown): value is { toDate: () => Date } {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as { toDate?: unknown };
+  return typeof candidate.toDate === "function";
+}
+
 function toISOString(value: unknown): string | undefined {
-  if (!value) return undefined;
+  if (value == null) return undefined;
   if (value instanceof Date) return value.toISOString();
-  if (value instanceof Timestamp) return value.toDate().toISOString();
-  if (
-    typeof value === "object" &&
-    value !== null &&
-    "toDate" in value &&
-    typeof (value as Record<string, unknown>).toDate === "function"
-  ) {
-    return (value as { toDate: () => Date }).toDate().toISOString();
+
+  if (hasToDate(value)) {
+    const date = value.toDate();
+    return date instanceof Date && !Number.isNaN(date.getTime())
+      ? date.toISOString()
+      : undefined;
   }
+
   if (typeof value === "string" || typeof value === "number") {
-    const date = new Date(value as string | number);
+    const date = new Date(value);
     return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
   }
+
   return undefined;
 }
 
@@ -45,7 +55,9 @@ export async function GET(request: NextRequest) {
 
   try {
     const areasRef = adminDb.collection("areas");
-    let q: Query = areasRef.where("organizationId", "==", organizationId).orderBy("name", "asc");
+    let q: Query = areasRef
+      .where("organizationId", "==", organizationId)
+      .orderBy("name", "asc");
 
     if (activeOnly === "true") {
       q = q.where("active", "==", true);
@@ -54,11 +66,12 @@ export async function GET(request: NextRequest) {
     }
 
     const snapshot = await q.get();
-    const areas = snapshot.docs.map((doc: DocumentSnapshot) => {
-      const data = doc.data() as Record<string, unknown> | undefined;
-      if (!data) return { id: doc.id };
+    const areas = snapshot.docs.map((areaDoc: DocumentSnapshot) => {
+      const data = areaDoc.data() as Record<string, unknown> | undefined;
+      if (!data) return { id: areaDoc.id };
+
       return {
-        id: doc.id,
+        id: areaDoc.id,
         name: data.name as string,
         type: data.type as string,
         code: data.code as string | undefined,
